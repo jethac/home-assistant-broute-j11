@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Any
 
@@ -144,6 +145,51 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
         finally:
             await session.async_close()
         return None
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, str]
+    ) -> ConfigFlowResult:
+        """Ask for new credentials after the meter rejected the stored ones."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Validate replacement credentials against the configured adapter."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            credentials = self._validate_credentials(user_input, errors)
+            if credentials is not None:
+                auth_id, password = credentials
+                device = str(entry.data[CONF_DEVICE])
+                error = await self._async_try_pairing(
+                    device, SessionConfig(auth_id=auth_id, password=password)
+                )
+                if error is None:
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        unique_id=meter_identifier(auth_id),
+                        data_updates={
+                            CONF_AUTH_ID: auth_id,
+                            CONF_PASSWORD: password,
+                        },
+                    )
+                errors["base"] = error
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_AUTH_ID): str,
+                    vol.Required(CONF_PASSWORD): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+        )
 
     @staticmethod
     def async_get_options_flow(entry: BrouteConfigEntry) -> BrouteOptionsFlow:

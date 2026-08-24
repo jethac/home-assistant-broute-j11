@@ -619,6 +619,12 @@ class J11Session:
                 ) from None
             finally:
                 self._pending.pop(expected, None)
+                if future.done() and not future.cancelled():
+                    # Losing the link completes the future through
+                    # _fail_waiters, which can happen after we stopped waiting
+                    # for it. Retrieve it so asyncio does not report the
+                    # exception as never retrieved.
+                    future.exception()
         commands.raise_for_result(frame)
         return frame
 

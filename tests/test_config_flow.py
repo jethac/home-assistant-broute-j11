@@ -129,6 +129,55 @@ async def test_pairing_failures_are_reported(
     assert result["errors"] == {"base": error}
 
 
+async def start_reauth(
+    hass: HomeAssistant, behaviour: AdapterBehaviour, entry: MockConfigEntry
+) -> str:
+    """Fail setup on rejected credentials and return the reauth flow ID."""
+    accepted = behaviour.pana_result
+    reject_pana(behaviour)
+    entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    behaviour.pana_result = accepted
+    flow = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]
+    assert flow["step_id"] == "reauth_confirm"
+    return str(flow["flow_id"])
+
+
+async def test_reauthentication_replaces_the_credentials(
+    hass: HomeAssistant,
+    behaviour: AdapterBehaviour,
+    adapter: FakeAdapter,
+    config_entry: MockConfigEntry,
+) -> None:
+    flow_id = await start_reauth(hass, behaviour, config_entry)
+    new_password = "SyntheticPw2"
+    behaviour.password = new_password
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {CONF_AUTH_ID: AUTH_ID, CONF_PASSWORD: new_password}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert config_entry.data[CONF_PASSWORD] == new_password
+
+
+async def test_reauthentication_reports_a_second_rejection(
+    hass: HomeAssistant,
+    behaviour: AdapterBehaviour,
+    adapter: FakeAdapter,
+    config_entry: MockConfigEntry,
+) -> None:
+    flow_id = await start_reauth(hass, behaviour, config_entry)
+    reject_pana(behaviour)
+    result = await hass.config_entries.flow.async_configure(
+        flow_id, {CONF_AUTH_ID: AUTH_ID, CONF_PASSWORD: PASSWORD}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert config_entry.data[CONF_PASSWORD] == PASSWORD
+
+
 async def test_the_polling_interval_can_be_changed(
     hass: HomeAssistant, setup_integration: MockConfigEntry
 ) -> None:

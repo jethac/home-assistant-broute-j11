@@ -14,6 +14,18 @@
           "auth_id": "16進数32文字です。",
           "password": "英数字12文字です。"
         }
+      },
+      "reauth_confirm": {
+        "title": "Bルート認証情報を更新",
+        "description": "スマートメーターが保存済みの認証情報を拒否しました。電力会社から通知された認証IDとパスワードを入力してください。",
+        "data": {
+          "auth_id": "Bルート認証ID",
+          "password": "Bルートパスワード"
+        },
+        "data_description": {
+          "auth_id": "16進数32文字です。",
+          "password": "英数字12文字です。"
+        }
       }
     },
     "error": {
@@ -26,7 +38,8 @@
       "unknown": "想定外の理由でペアリングに失敗しました。ログを確認してください。"
     },
     "abort": {
-      "already_configured": "このスマートメーターはすでに設定されています。"
+      "already_configured": "このスマートメーターはすでに設定されています。",
+      "reauth_successful": "認証情報を更新しました。統合を再接続します。"
     }
   },
   "options": {
@@ -41,11 +54,21 @@
   },
   "entity": {
     "sensor": {
-      "instantaneous_power": { "name": "瞬時電力" },
-      "instantaneous_current_r": { "name": "瞬時電流（R相）" },
-      "instantaneous_current_t": { "name": "瞬時電流（T相）" },
-      "cumulative_forward_energy": { "name": "積算電力量（買電）" },
-      "cumulative_reverse_energy": { "name": "積算電力量（売電）" }
+      "instantaneous_power": {
+        "name": "瞬時電力"
+      },
+      "instantaneous_current_r": {
+        "name": "瞬時電流（R相）"
+      },
+      "instantaneous_current_t": {
+        "name": "瞬時電流（T相）"
+      },
+      "cumulative_forward_energy": {
+        "name": "積算電力量（買電）"
+      },
+      "cumulative_reverse_energy": {
+        "name": "積算電力量（売電）"
+      }
     }
   }
 }

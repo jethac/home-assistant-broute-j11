@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.broute_j11.const import CONF_SCAN_INTERVAL
+from custom_components.broute_j11.const import CONF_SCAN_INTERVAL, DOMAIN
 
 from .fixtures.fake_adapter import AdapterBehaviour, FakeAdapter
 
@@ -65,3 +65,5 @@ async def test_rejected_credentials_ask_for_reauthentication(
     assert not await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
     assert config_entry.state is ConfigEntryState.SETUP_ERROR
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [flow["step_id"] for flow in flows] == ["reauth_confirm"]

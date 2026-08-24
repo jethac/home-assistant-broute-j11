@@ -14,6 +14,18 @@
           "auth_id": "32 hexadecimal characters.",
           "password": "12 letters and digits."
         }
+      },
+      "reauth_confirm": {
+        "title": "Update your Route-B credentials",
+        "description": "The meter rejected the stored credentials. Enter the authentication ID and password your electricity retailer sent you.",
+        "data": {
+          "auth_id": "Route-B authentication ID",
+          "password": "Route-B password"
+        },
+        "data_description": {
+          "auth_id": "32 hexadecimal characters.",
+          "password": "12 letters and digits."
+        }
       }
     },
     "error": {
@@ -26,7 +38,8 @@
       "unknown": "Pairing failed for an unexpected reason. Check the logs."
     },
     "abort": {
-      "already_configured": "This smart meter is already configured."
+      "already_configured": "This smart meter is already configured.",
+      "reauth_successful": "Credentials updated. The integration will reconnect."
     }
   },
   "options": {
@@ -41,11 +54,21 @@
   },
   "entity": {
     "sensor": {
-      "instantaneous_power": { "name": "Instantaneous power" },
-      "instantaneous_current_r": { "name": "Instantaneous current R phase" },
-      "instantaneous_current_t": { "name": "Instantaneous current T phase" },
-      "cumulative_forward_energy": { "name": "Cumulative energy consumed" },
-      "cumulative_reverse_energy": { "name": "Cumulative energy returned" }
+      "instantaneous_power": {
+        "name": "Instantaneous power"
+      },
+      "instantaneous_current_r": {
+        "name": "Instantaneous current R phase"
+      },
+      "instantaneous_current_t": {
+        "name": "Instantaneous current T phase"
+      },
+      "cumulative_forward_energy": {
+        "name": "Cumulative energy consumed"
+      },
+      "cumulative_reverse_energy": {
+        "name": "Cumulative energy returned"
+      }
     }
   }
 }
