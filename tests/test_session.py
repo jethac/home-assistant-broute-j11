@@ -16,8 +16,12 @@ from custom_components.broute_j11.protocol import commands
 from custom_components.broute_j11.protocol.codec import Frame
 from custom_components.broute_j11.protocol.echonet import Epc
 from custom_components.broute_j11.protocol.session import (
+    _RECONNECT_ATTEMPTS,
+    _SCAN_ATTEMPTS,
+    DEFAULT_SCAN_DURATION,
     AuthenticationError,
     BackoffPolicy,
+    CachedNetwork,
     J11Session,
     MeterNotFoundError,
     SessionClosedError,
@@ -53,6 +57,22 @@ def make_adapter(**overrides: object) -> FakeAdapter:
     )
 
 
+class MemoryCache:
+    """An in-memory :class:`NetworkCache` for the reconnect tests."""
+
+    def __init__(self, network: CachedNetwork | None) -> None:
+        """Start with ``network`` already cached."""
+        self.network = network
+
+    def load(self) -> CachedNetwork | None:
+        """Return the cached network."""
+        return self.network
+
+    def store(self, network: CachedNetwork) -> None:
+        """Remember ``network``."""
+        self.network = network
+
+
 def make_session(
     adapter: FakeAdapter, config: SessionConfig | None = None, **kwargs: object
 ) -> J11Session:
@@ -75,6 +95,7 @@ async def test_connect_runs_the_documented_start_up_sequence() -> None:
             commands.CommandCode.START_ROUTE_B,
             commands.CommandCode.OPEN_UDP_PORT,
             commands.CommandCode.START_PANA,
+            commands.CommandCode.TRANSMIT_DATA,
             commands.CommandCode.TRANSMIT_DATA,
         ]
         assert link.channel == fake.METER_CHANNEL
@@ -264,6 +285,94 @@ async def test_a_rejected_pana_authentication_latches_the_session() -> None:
     assert len(adapter.requests) == requests, "a latched session must not retry"
 
 
+async def test_an_unanswered_pana_exchange_stays_retryable() -> None:
+    adapter = make_adapter(pana_result=0x03)
+    session = make_session(adapter)
+    with pytest.raises(SessionError) as excinfo:
+        await session.async_connect()
+    assert not isinstance(excinfo.value, AuthenticationError)
+    assert not session.authentication_failed
+
+
+async def test_the_scan_is_retried_with_a_longer_dwell() -> None:
+    adapter = make_adapter(silent_scans=1)
+    session = make_session(adapter, make_config(scan_timeout=0.3))
+    async with session:
+        assert session.connected
+    durations = [
+        frame.data[0] for frame in adapter.sent(commands.CommandCode.ACTIVE_SCAN)
+    ]
+    assert durations == [DEFAULT_SCAN_DURATION, DEFAULT_SCAN_DURATION + 1]
+
+
+async def test_the_scan_retries_are_bounded() -> None:
+    adapter = make_adapter(silent_scans=_SCAN_ATTEMPTS)
+    session = make_session(adapter, make_config(scan_timeout=0.3))
+    with pytest.raises(MeterNotFoundError):
+        await session.async_connect()
+    assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == _SCAN_ATTEMPTS
+
+
+async def test_a_refused_identity_property_keeps_the_scaling_values() -> None:
+    adapter = make_adapter(
+        unsupported={Epc.SERIAL_NUMBER, Epc.MANUFACTURER_CODE, Epc.STANDARD_VERSION}
+    )
+    session = make_session(adapter, make_config(echonet_attempts=1))
+    async with session:
+        profile = session.profile
+    assert profile.unit == Decimal("0.1")
+    assert profile.digits == 6
+    assert profile.serial_number is None
+    assert profile.manufacturer_code is None
+
+
+async def test_a_cached_network_is_rejoined_without_scanning() -> None:
+    adapter = make_adapter()
+    cache = MemoryCache(
+        CachedNetwork(
+            channel=fake.METER_CHANNEL,
+            pan_id=fake.METER_PAN_ID,
+            mac_address=fake.METER_MAC,
+        )
+    )
+    session = make_session(adapter, network_cache=cache)
+    async with session:
+        assert session.connected
+    assert not adapter.sent(commands.CommandCode.ACTIVE_SCAN)
+    settings = adapter.sent(commands.CommandCode.SET_INITIAL_SETTINGS)
+    assert [frame.data[2] for frame in settings] == [fake.METER_CHANNEL]
+
+
+async def test_a_stale_cached_network_falls_back_to_a_scan() -> None:
+    adapter = make_adapter(route_b_failures=1)
+    cache = MemoryCache(
+        CachedNetwork(
+            channel=commands.MIN_CHANNEL,
+            pan_id=fake.METER_PAN_ID,
+            mac_address=fake.METER_MAC,
+        )
+    )
+    session = make_session(adapter, network_cache=cache)
+    async with session:
+        assert session.connected
+    assert adapter.sent(commands.CommandCode.ACTIVE_SCAN)
+    assert cache.network == CachedNetwork(
+        channel=fake.METER_CHANNEL,
+        pan_id=fake.METER_PAN_ID,
+        mac_address=fake.METER_MAC,
+    )
+
+
+async def test_the_joined_network_is_cached_for_the_next_connect() -> None:
+    adapter = make_adapter()
+    cache = MemoryCache(None)
+    session = make_session(adapter, network_cache=cache)
+    async with session:
+        assert session.connected
+    assert cache.network is not None
+    assert cache.network.channel == fake.METER_CHANNEL
+
+
 async def test_a_missing_pana_notification_times_out() -> None:
     adapter = make_adapter(silent_notifications={commands.NotificationCode.PANA_RESULT})
     session = make_session(adapter)
@@ -348,7 +457,8 @@ async def test_ensure_connected_stops_after_the_last_attempt() -> None:
     )
     with pytest.raises(SessionClosedError):
         await session.async_ensure_connected()
-    assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 3
+    scans = adapter.sent(commands.CommandCode.ACTIVE_SCAN)
+    assert len(scans) == _RECONNECT_ATTEMPTS * _SCAN_ATTEMPTS
 
 
 async def test_closing_terminates_pana_and_releases_the_port() -> None:

@@ -45,6 +45,7 @@ METER_CHANNEL: Final = 0x0C
 METER_RSSI_BYTE: Final = 0xDE
 
 _SUCCESS: Final = 0x01
+_FAILED: Final = 0x02
 #: Response result the adapter returns when the credentials were already set.
 CREDENTIALS_ALREADY_SET: Final = 0x58
 
@@ -76,7 +77,11 @@ class AdapterBehaviour:
     auth_id: str = ""
     password: str = ""
     beacon_channel: int | None = METER_CHANNEL
+    #: Scans that stay silent before the meter answers, as a short dwell does.
+    silent_scans: int = 0
     channel_mask: int = ALL_CHANNELS_MASK
+    #: Route-B start requests that fail before one succeeds.
+    route_b_failures: int = 0
     pana_result: int = _SUCCESS
     credentials_result: int = _SUCCESS
     fail_open: bool = False
@@ -86,6 +91,8 @@ class AdapterBehaviour:
     line_noise: bytes = b""
     send_instance_list: bool = False
     get_sna: bool = False
+    #: Properties the meter refuses, answering Get_SNA with an empty value.
+    unsupported: set[int] = field(default_factory=set)
     drop_meter_responses: int = 0
     properties: dict[int, bytes] = field(
         default_factory=lambda: dict(DEFAULT_PROPERTIES)
@@ -107,6 +114,8 @@ class FakeAdapter:
         self._reassembler = FrameReassembler()
         self._open = False
         self._dropped = 0
+        self._scans = 0
+        self._route_b_attempts = 0
 
     # -- transport interface -------------------------------------------------
 
@@ -240,9 +249,11 @@ class FakeAdapter:
 
     def _handle_scan(self, frame: Frame) -> None:
         self.respond(frame.command_code, bytes([_SUCCESS]))
+        self._scans += 1
+        answers = self._scans > self.behaviour.silent_scans
         mask = int.from_bytes(frame.data[1:5], "big")
         for channel in sorted(bit for bit in range(32) if mask >> bit & 1):
-            if channel == self.behaviour.beacon_channel:
+            if answers and channel == self.behaviour.beacon_channel:
                 self.notify(
                     NotificationCode.ACTIVE_SCAN_RESULT,
                     bytes([0x00, channel, 0x01])
@@ -254,6 +265,10 @@ class FakeAdapter:
             self.notify(NotificationCode.ACTIVE_SCAN_RESULT, bytes([0x01, channel]))
 
     def _handle_route_b(self, frame: Frame) -> None:
+        self._route_b_attempts += 1
+        if self._route_b_attempts <= self.behaviour.route_b_failures:
+            self.respond(frame.command_code, bytes([_FAILED]))
+            return
         self.respond(
             frame.command_code,
             bytes([_SUCCESS, METER_CHANNEL])
@@ -292,19 +307,22 @@ class FakeAdapter:
             self._dropped += 1
             return
         request = EchonetLiteFrame.decode(payload)
+        requested = tuple(request.property_map())
+        refused = {
+            epc
+            for epc in requested
+            if self.behaviour.get_sna or epc in self.behaviour.unsupported
+        }
         properties = tuple(
-            Property(
-                epc=epc,
-                edt=b"" if self.behaviour.get_sna else self._value(epc),
-            )
-            for epc in request.property_map()
+            Property(epc=epc, edt=b"" if epc in refused else self._value(epc))
+            for epc in requested
         )
         self._notify_datagram(
             EchonetLiteFrame(
                 transaction_id=request.transaction_id,
                 source_object=LOW_VOLTAGE_METER_OBJECT,
                 destination_object=CONTROLLER_OBJECT,
-                esv=Esv.GET_SNA if self.behaviour.get_sna else Esv.GET_RES,
+                esv=Esv.GET_SNA if refused else Esv.GET_RES,
                 properties=properties,
             ).encode()
         )

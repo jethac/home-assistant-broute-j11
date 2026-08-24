@@ -24,7 +24,12 @@ READ_CHUNK: Final = 1024
 
 
 class TransportError(Exception):
-    """The adapter's byte stream is unusable, for example after a USB unplug."""
+    """The adapter's byte stream is unusable, for example after a USB unplug.
+
+    The session and config entry layers log these messages, so they never name
+    the device: a ``/dev/serial/by-id/...`` path carries the adapter's USB
+    serial number.
+    """
 
 
 @runtime_checkable
@@ -83,7 +88,9 @@ class SerialTransport:
                 write_timeout=self._read_slice * 10,
             )
         except (OSError, serial.SerialException) as err:
-            raise TransportError(f"cannot open {self._device}: {err}") from err
+            raise TransportError(
+                f"the serial device could not be opened ({type(err).__name__})"
+            ) from err
 
     def close(self) -> None:
         """Close the port, ignoring a port that has already gone away."""
@@ -106,7 +113,9 @@ class SerialTransport:
             waiting = port.in_waiting
             return bytes(port.read(min(size, waiting) if waiting else 1))
         except (OSError, serial.SerialException) as err:
-            raise TransportError(f"read from {self._device} failed: {err}") from err
+            raise TransportError(
+                f"reading from the serial device failed ({type(err).__name__})"
+            ) from err
 
     def write(self, data: bytes) -> None:
         """Write ``data`` and flush it to the adapter."""
@@ -115,9 +124,11 @@ class SerialTransport:
             port.write(data)
             port.flush()
         except (OSError, serial.SerialException) as err:
-            raise TransportError(f"write to {self._device} failed: {err}") from err
+            raise TransportError(
+                f"writing to the serial device failed ({type(err).__name__})"
+            ) from err
 
     def _require_port(self) -> serial.Serial:
         if self._port is None:
-            raise TransportError(f"{self._device} is not open")
+            raise TransportError("the serial device is not open")
         return self._port

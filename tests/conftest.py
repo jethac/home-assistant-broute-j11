@@ -23,7 +23,7 @@ from custom_components.broute_j11.const import (
 from custom_components.broute_j11.coordinator import meter_identifier
 from custom_components.broute_j11.protocol.session import SessionConfig
 
-from .fixtures.fake_adapter import AdapterBehaviour, FakeAdapter
+from .fixtures.fake_adapter import METER_MAC, AdapterBehaviour, FakeAdapter
 
 AUTH_ID = "0000000000000000000000000000ABCD"
 PASSWORD = "SyntheticPw1"
@@ -93,7 +93,7 @@ def config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
         data=ENTRY_DATA,
-        unique_id=meter_identifier(AUTH_ID),
+        unique_id=meter_identifier(METER_MAC),
         title="Smart meter",
     )
 

@@ -46,6 +46,10 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Start a flow that has not paired with a meter yet."""
+        self._identifier: str | None = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -57,13 +61,15 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
             credentials = self._validate_credentials(user_input, errors)
             if credentials is not None:
                 auth_id, password = credentials
-                await self.async_set_unique_id(meter_identifier(auth_id))
-                self._abort_if_unique_id_configured()
                 self._async_abort_entries_match({CONF_DEVICE: device})
                 error = await self._async_try_pairing(
                     device, SessionConfig(auth_id=auth_id, password=password)
                 )
                 if error is None:
+                    # The meter's identity is only known once it has answered,
+                    # so the duplicate check happens after pairing.
+                    await self.async_set_unique_id(self._identifier)
+                    self._abort_if_unique_id_configured()
                     return self.async_create_entry(
                         title="Smart meter",
                         data={
@@ -127,10 +133,13 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_try_pairing(
         self, device: str, config: SessionConfig
     ) -> str | None:
-        """Return an error key, or ``None`` when pairing succeeded."""
+        """Return an error key, or ``None`` when pairing succeeded.
+
+        On success the paired meter's identifier is kept in ``_identifier``.
+        """
         session = J11Session(SerialTransport(device), config)
         try:
-            await session.async_connect()
+            link = await session.async_connect()
         except TransportError:
             return "cannot_connect"
         except AuthenticationError:
@@ -144,6 +153,7 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
             return "unknown"
         finally:
             await session.async_close()
+        self._identifier = meter_identifier(link.mac_address)
         return None
 
     async def async_step_reauth(
@@ -167,9 +177,15 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
                     device, SessionConfig(auth_id=auth_id, password=password)
                 )
                 if error is None:
+                    if (
+                        entry.unique_id is not None
+                        and self._identifier != entry.unique_id
+                    ):
+                        return self.async_abort(reason="wrong_meter")
+                    # The unique ID stays put: it identifies the meter, not the
+                    # credentials, so entity history survives this update.
                     return self.async_update_reload_and_abort(
                         entry,
-                        unique_id=meter_identifier(auth_id),
                         data_updates={
                             CONF_AUTH_ID: auth_id,
                             CONF_PASSWORD: password,

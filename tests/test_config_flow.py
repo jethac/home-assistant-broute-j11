@@ -7,6 +7,7 @@ from collections.abc import Callable
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -151,6 +152,7 @@ async def test_reauthentication_replaces_the_credentials(
     config_entry: MockConfigEntry,
 ) -> None:
     flow_id = await start_reauth(hass, behaviour, config_entry)
+    unique_id = config_entry.unique_id
     new_password = "SyntheticPw2"
     behaviour.password = new_password
     result = await hass.config_entries.flow.async_configure(
@@ -160,6 +162,32 @@ async def test_reauthentication_replaces_the_credentials(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert config_entry.data[CONF_PASSWORD] == new_password
+    # Entity identity and the Energy dashboard's history follow the entry, so
+    # replacing the credentials must not move it.
+    assert config_entry.unique_id == unique_id
+
+
+async def test_reauthentication_keeps_the_entity_identities(
+    hass: HomeAssistant,
+    behaviour: AdapterBehaviour,
+    setup_integration: MockConfigEntry,
+) -> None:
+    entry = setup_integration
+    registry = er.async_get(hass)
+    before = {item.entity_id: item.unique_id for item in registry.entities.values()}
+    unique_id = entry.unique_id
+    entry.async_start_reauth(hass)
+    await hass.async_block_till_done()
+    flow = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]
+    behaviour.password = "SyntheticPw2"
+    await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {CONF_AUTH_ID: AUTH_ID, CONF_PASSWORD: "SyntheticPw2"}
+    )
+    await hass.async_block_till_done()
+    after = {item.entity_id: item.unique_id for item in registry.entities.values()}
+    assert before
+    assert after == before
+    assert entry.unique_id == unique_id
 
 
 async def test_reauthentication_reports_a_second_rejection(

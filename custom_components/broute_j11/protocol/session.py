@@ -27,7 +27,7 @@ from ipaddress import IPv6Address
 import logging
 import random
 from types import TracebackType
-from typing import Final, Self
+from typing import Final, Protocol, Self, runtime_checkable
 
 from . import commands
 from .codec import Frame, FrameReassembler, FrameStats, ProtocolError, response_code
@@ -56,16 +56,29 @@ _LOGGER = logging.getLogger(__name__)
 #: Channel used for the initial settings that precede an active scan; the real
 #: channel is only known once the meter's beacon has been received.
 PROVISIONAL_CHANNEL: Final = commands.MIN_CHANNEL
-#: Per-channel dwell time exponent for the active scan (about 620 ms).
-DEFAULT_SCAN_DURATION: Final = 6
+#: Per-channel dwell time exponent for the active scan (about 2.5 s). Shorter
+#: dwells miss the meter's beacon on real installations.
+DEFAULT_SCAN_DURATION: Final = 8
+#: How much longer each retried scan dwells per channel.
+_SCAN_DURATION_STEP: Final = 1
+#: Highest dwell time exponent the adapter accepts (specification §3.2.3.4).
+_MAX_SCAN_DURATION: Final = 14
+#: How many times a fruitless scan is repeated with a longer dwell.
+_SCAN_ATTEMPTS: Final = 3
 #: Highest transaction ID before wrapping.
 _MAX_TRANSACTION_ID: Final = 0xFFFF
 
-#: Properties fetched once per connection to scale the energy counters.
-PROFILE_PROPERTIES: Final[tuple[Epc, ...]] = (
+#: Properties fetched once per connection to scale the energy counters. They are
+#: requested on their own so a meter that refuses an optional identity property
+#: cannot cost us the scaling factors.
+SCALING_PROPERTIES: Final[tuple[Epc, ...]] = (
     Epc.COEFFICIENT,
     Epc.CUMULATIVE_DIGITS,
     Epc.CUMULATIVE_UNIT,
+)
+
+#: Optional properties that only describe the meter.
+IDENTITY_PROPERTIES: Final[tuple[Epc, ...]] = (
     Epc.MANUFACTURER_CODE,
     Epc.STANDARD_VERSION,
     Epc.SERIAL_NUMBER,
@@ -144,6 +157,30 @@ class BackoffPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class CachedNetwork:
+    """The minimum state needed to rejoin a known meter without scanning.
+
+    ``mac_address`` is a stable private identifier, so callers must redact it
+    before it reaches diagnostics (PRD §6.2, §6.7).
+    """
+
+    channel: int
+    pan_id: int
+    mac_address: bytes
+
+
+@runtime_checkable
+class NetworkCache(Protocol):
+    """Storage for the network state a session rejoins after an interruption."""
+
+    def load(self) -> CachedNetwork | None:
+        """Return the last joined network, or ``None`` if none is known."""
+
+    def store(self, network: CachedNetwork) -> None:
+        """Remember ``network`` for the next session."""
+
+
+@dataclass(frozen=True, slots=True)
 class MeterLink:
     """The radio link this session established.
 
@@ -194,12 +231,17 @@ class J11Session:
         *,
         backoff: BackoffPolicy | None = None,
         on_disconnect: Callable[[], None] | None = None,
+        network_cache: NetworkCache | None = None,
     ) -> None:
         """Create a session; no I/O happens until :meth:`async_connect`."""
         self._transport = transport
         self._config = config
         self._backoff = backoff or BackoffPolicy()
         self._on_disconnect = on_disconnect
+        self._network_cache = network_cache
+        self._cached_network = (
+            network_cache.load() if network_cache is not None else None
+        )
         self._reassembler = FrameReassembler()
         self._stats = SessionStats()
         self._transaction_lock = asyncio.Lock()
@@ -221,6 +263,11 @@ class J11Session:
     def connected(self) -> bool:
         """Whether a PANA session is currently established."""
         return self._link is not None
+
+    @property
+    def cached_network(self) -> CachedNetwork | None:
+        """The network state a later session can rejoin without scanning."""
+        return self._cached_network
 
     @property
     def link(self) -> MeterLink | None:
@@ -350,6 +397,29 @@ class J11Session:
         self._fail_waiters(SessionClosedError("the session was closed"))
 
     async def _async_establish(self) -> MeterLink:
+        """Rejoin the cached network if there is one, else scan for the meter.
+
+        A full active scan costs a minute of radio time, so a serial or radio
+        interruption reuses the channel the meter was last found on and only
+        falls back to scanning when that channel no longer answers (PRD §6.2).
+        """
+        cached = self._cached_network
+        if cached is None:
+            return await self._async_establish_network(None)
+        try:
+            return await self._async_establish_network(cached)
+        except AuthenticationError:
+            raise
+        except (SessionError, ProtocolError) as err:
+            _LOGGER.info(
+                "Rejoining the meter on channel %s failed (%s); scanning again",
+                cached.channel,
+                err,
+            )
+            self._cached_network = None
+        return await self._async_establish_network(None)
+
+    async def _async_establish_network(self, cached: CachedNetwork | None) -> MeterLink:
         """Run the documented Route-B start-up sequence (B-route note §3)."""
         await self._async_reset()
         version = commands.parse_version_response(
@@ -357,10 +427,14 @@ class J11Session:
                 commands.version_request(), commands.CommandCode.GET_VERSION
             )
         )
-        await self._async_initial_settings(PROVISIONAL_CHANNEL)
-        await self._async_set_credentials()
-        beacon = await self._async_scan()
-        await self._async_initial_settings(beacon.channel)
+        if cached is not None:
+            await self._async_initial_settings(cached.channel)
+            await self._async_set_credentials()
+        else:
+            await self._async_initial_settings(PROVISIONAL_CHANNEL)
+            await self._async_set_credentials()
+            beacon = await self._async_scan()
+            await self._async_initial_settings(beacon.channel)
         start = commands.parse_route_b_start_response(
             await self._async_request(
                 commands.start_route_b_request(),
@@ -368,10 +442,19 @@ class J11Session:
                 timeout=self._config.pana_timeout,
             )
         )
+        if cached is not None and start.mac_address != cached.mac_address:
+            raise SessionError("the cached channel belongs to a different meter")
         await self._async_request(
             commands.open_udp_port_request(), commands.CommandCode.OPEN_UDP_PORT
         )
         await self._async_start_pana(start.mac_address)
+        self._remember_network(
+            CachedNetwork(
+                channel=start.channel,
+                pan_id=start.pan_id,
+                mac_address=start.mac_address,
+            )
+        )
         link = MeterLink(
             channel=start.channel,
             pan_id=start.pan_id,
@@ -393,6 +476,14 @@ class J11Session:
             self._link = None
             raise
         return link
+
+    def _remember_network(self, network: CachedNetwork) -> None:
+        """Keep the joined network so the next connect can skip the scan."""
+        if network == self._cached_network:
+            return
+        self._cached_network = network
+        if self._network_cache is not None:
+            self._network_cache.store(network)
 
     async def _async_reset(self) -> None:
         self._arm(commands.NotificationCode.STARTUP_COMPLETED)
@@ -422,12 +513,32 @@ class J11Session:
             raise
 
     async def _async_scan(self) -> commands.ActiveScanResult:
-        """Scan for the meter that matches the configured authentication ID."""
+        """Scan for the meter, dwelling longer after every fruitless attempt.
+
+        Real installations regularly need more than one scan: a meter that stays
+        silent through a short dwell answers a longer one from the same adapter.
+        """
+        duration = self._config.scan_duration
+        for attempt in range(1, _SCAN_ATTEMPTS + 1):
+            try:
+                return await self._async_scan_once(duration)
+            except MeterNotFoundError:
+                if attempt == _SCAN_ATTEMPTS:
+                    raise
+                duration = min(duration + _SCAN_DURATION_STEP, _MAX_SCAN_DURATION)
+                _LOGGER.debug(
+                    "The active scan found no meter; retrying with duration %s",
+                    duration,
+                )
+        raise MeterNotFoundError("the active scan found no smart meter")
+
+    async def _async_scan_once(self, duration: int) -> commands.ActiveScanResult:
+        """Run one active scan for the configured authentication ID."""
         while not self._scan_results.empty():
             self._scan_results.get_nowait()
         await self._async_request(
             commands.active_scan_request(
-                duration=self._config.scan_duration,
+                duration=duration,
                 channel_mask=self._config.channel_mask,
                 auth_id=self._config.auth_id,
             ),
@@ -466,6 +577,10 @@ class J11Session:
             commands.NotificationCode.PANA_RESULT, self._config.pana_timeout
         )
         result = commands.parse_pana_result_notification(frame)
+        if result.result == commands.PanaResultCode.NO_RESPONSE:
+            # The meter never answered. That is a radio problem, not a rejected
+            # credential, so the session stays retryable.
+            raise SessionClosedError("the meter did not answer the PANA exchange")
         if not result.succeeded:
             self._authentication_failed = True
             raise AuthenticationError(
@@ -476,7 +591,13 @@ class J11Session:
             raise SessionError("PANA completed with an unexpected device")
 
     async def _async_read_profile(self) -> MeterProfile:
-        values = await self._async_get_properties(PROFILE_PROPERTIES, required=False)
+        values = await self._async_get_properties(SCALING_PROPERTIES, required=False)
+        try:
+            values |= await self._async_get_properties(
+                IDENTITY_PROPERTIES, required=False
+            )
+        except (SessionError, ProtocolError) as err:
+            _LOGGER.debug("The meter reported no identity properties: %s", err)
         unit = values.get(Epc.CUMULATIVE_UNIT)
         coefficient = values.get(Epc.COEFFICIENT)
         digits = values.get(Epc.CUMULATIVE_DIGITS)
@@ -584,10 +705,17 @@ class J11Session:
                 self._stats.unsolicited_datagrams += 1
                 continue
             if frame.esv == Esv.GET_SNA:
-                raise EchonetFrameError(
-                    "the meter refused the Get request for "
-                    + ", ".join(f"0x{epc:02X}" for epc in frame.property_map())
+                # A Get_SNA still carries the properties the meter could read;
+                # only the refused ones come back empty. Keeping the successful
+                # ones means one unsupported optional property cannot cost us
+                # the scaling factors that share the request.
+                values = frame.property_map()
+                refused = [epc for epc, edt in values.items() if not edt]
+                _LOGGER.debug(
+                    "The meter refused %s",
+                    ", ".join(f"0x{epc:02X}" for epc in refused),
                 )
+                return values
             if not frame.is_get_response:
                 self._stats.unsolicited_datagrams += 1
                 continue

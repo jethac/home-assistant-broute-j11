@@ -39,6 +39,7 @@ async def async_get_config_entry_diagnostics(
             "pan_id": REDACTED if link is not None else None,
             "mac_address": REDACTED if link is not None else None,
             "address": REDACTED if link is not None else None,
+            "cached_network": REDACTED if session.cached_network is not None else None,
             "rssi": link.rssi if link is not None else None,
             "firmware_version": link.firmware_version if link is not None else None,
         },

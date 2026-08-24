@@ -106,11 +106,13 @@ def test_open_is_idempotent(port: StubPort) -> None:
 
 def test_open_reports_a_missing_device(monkeypatch: pytest.MonkeyPatch) -> None:
     def factory(**_: object) -> StubPort:
-        raise serial.SerialException("no such file or directory")
+        raise serial.SerialException(f"could not open port {DEVICE}")
 
     monkeypatch.setattr(transport_module.serial, "Serial", factory)
-    with pytest.raises(TransportError, match="cannot open"):
+    with pytest.raises(TransportError, match="could not be opened") as raised:
         SerialTransport(DEVICE).open()
+    # The path embeds the adapter's USB serial number (PRD §6.7).
+    assert DEVICE not in str(raised.value)
 
 
 def test_read_drains_the_buffered_burst(port: StubPort) -> None:
@@ -138,8 +140,9 @@ def test_a_failing_read_is_reported(port: StubPort) -> None:
     transport.open()
     port.fail_on.add("read")
     port.buffer += b"x"
-    with pytest.raises(TransportError, match="read from"):
+    with pytest.raises(TransportError, match="reading from") as raised:
         transport.read()
+    assert DEVICE not in str(raised.value)
 
 
 def test_write_flushes_the_port(port: StubPort) -> None:
@@ -154,16 +157,19 @@ def test_a_failing_write_is_reported(port: StubPort) -> None:
     transport = SerialTransport(DEVICE)
     transport.open()
     port.fail_on.add("write")
-    with pytest.raises(TransportError, match="write to"):
+    with pytest.raises(TransportError, match="writing to") as raised:
         transport.write(b"hello")
+    assert DEVICE not in str(raised.value)
 
 
 def test_using_a_closed_transport_is_an_error(port: StubPort) -> None:
     transport = SerialTransport(DEVICE)
-    with pytest.raises(TransportError, match="is not open"):
+    with pytest.raises(TransportError, match="is not open") as read_error:
         transport.read()
-    with pytest.raises(TransportError, match="is not open"):
+    with pytest.raises(TransportError, match="is not open") as write_error:
         transport.write(b"hello")
+    assert DEVICE not in str(read_error.value)
+    assert DEVICE not in str(write_error.value)
 
 
 def test_close_releases_the_port_once(port: StubPort) -> None:

@@ -39,7 +39,8 @@
     },
     "abort": {
       "already_configured": "This smart meter is already configured.",
-      "reauth_successful": "Credentials updated. The integration will reconnect."
+      "reauth_successful": "Credentials updated. The integration will reconnect.",
+      "wrong_meter": "This adapter is now paired with a different smart meter. Remove the integration and set it up again."
     }
   },
   "options": {
