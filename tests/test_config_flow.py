@@ -190,6 +190,29 @@ async def test_reauthentication_keeps_the_entity_identities(
     assert entry.unique_id == unique_id
 
 
+async def test_re_adding_the_meter_keeps_the_entity_identities(
+    hass: HomeAssistant,
+    adapter: FakeAdapter,
+    setup_integration: MockConfigEntry,
+) -> None:
+    """Removing and re-adding the same meter must reuse its entity IDs.
+
+    The Energy dashboard's statistics hang off the entity unique IDs, so a
+    meter that is paired again has to come back with the identity it had.
+    """
+    registry = er.async_get(hass)
+    before = {item.entity_id: item.unique_id for item in registry.entities.values()}
+    assert before
+    assert await hass.config_entries.async_remove(setup_integration.entry_id)
+    await hass.async_block_till_done()
+    flow_id = await start_flow(hass)
+    result = await hass.config_entries.flow.async_configure(flow_id, USER_INPUT)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    after = {item.entity_id: item.unique_id for item in registry.entities.values()}
+    assert after == before
+
+
 async def test_reauthentication_reports_a_second_rejection(
     hass: HomeAssistant,
     behaviour: AdapterBehaviour,

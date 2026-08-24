@@ -16,9 +16,9 @@ from custom_components.broute_j11.protocol import commands
 from custom_components.broute_j11.protocol.codec import Frame
 from custom_components.broute_j11.protocol.echonet import Epc
 from custom_components.broute_j11.protocol.session import (
+    _ASSOCIATION_ATTEMPTS,
     _RECONNECT_ATTEMPTS,
     _SCAN_ATTEMPTS,
-    DEFAULT_SCAN_DURATION,
     AuthenticationError,
     BackoffPolicy,
     CachedNetwork,
@@ -28,6 +28,7 @@ from custom_components.broute_j11.protocol.session import (
     SessionConfig,
     SessionError,
     SessionTimeoutError,
+    scan_budget,
 )
 from custom_components.broute_j11.protocol.transport import TransportError
 
@@ -38,6 +39,9 @@ AUTH_ID = "0000000000000000000000000000ABCD"
 PASSWORD = "SyntheticPw1"
 FAST = {
     "command_timeout": 0.5,
+    # The scan deadline follows the dwell time, so the shortest dwell keeps a
+    # fruitless scan short (about 0.4 s for all 14 channels).
+    "scan_duration": 1,
     "startup_timeout": 0.5,
     "scan_timeout": 1.0,
     "pana_timeout": 0.5,
@@ -296,21 +300,71 @@ async def test_an_unanswered_pana_exchange_stays_retryable() -> None:
 
 async def test_the_scan_is_retried_with_a_longer_dwell() -> None:
     adapter = make_adapter(silent_scans=1)
-    session = make_session(adapter, make_config(scan_timeout=0.3))
+    config = make_config()
+    session = make_session(adapter, config)
     async with session:
         assert session.connected
     durations = [
         frame.data[0] for frame in adapter.sent(commands.CommandCode.ACTIVE_SCAN)
     ]
-    assert durations == [DEFAULT_SCAN_DURATION, DEFAULT_SCAN_DURATION + 1]
+    assert durations == [config.scan_duration, config.scan_duration + 1]
 
 
 async def test_the_scan_retries_are_bounded() -> None:
     adapter = make_adapter(silent_scans=_SCAN_ATTEMPTS)
-    session = make_session(adapter, make_config(scan_timeout=0.3))
+    session = make_session(adapter)
     with pytest.raises(MeterNotFoundError):
         await session.async_connect()
     assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == _SCAN_ATTEMPTS
+
+
+def test_the_scan_budget_follows_the_dwell_time_and_the_channels() -> None:
+    mask = commands.ALL_CHANNELS_MASK
+    # 9.64 ms * 2**9 per channel over 14 channels is about 69 s of radio time,
+    # which a fixed one-minute deadline would cut short.
+    assert scan_budget(9, mask) > 69.0
+    assert scan_budget(10, mask) == pytest.approx(2 * scan_budget(9, mask))
+    assert scan_budget(9, 1 << fake.METER_CHANNEL) == pytest.approx(
+        scan_budget(9, mask) / 14
+    )
+
+
+async def test_a_scan_that_dwells_on_every_channel_is_not_cut_short() -> None:
+    """The deadline must outlast a scan that reports channels in real time."""
+    adapter = make_adapter(dwell=True)
+    session = make_session(adapter, make_config(scan_duration=2))
+    async with session:
+        assert session.connected
+    assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+
+
+async def test_a_failed_association_is_retried_from_a_fresh_scan() -> None:
+    adapter = make_adapter(association_failures=1)
+    session = make_session(adapter)
+    async with session:
+        assert session.connected
+    assert len(adapter.sent(commands.CommandCode.START_ROUTE_B)) == 2
+    assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 2
+
+
+async def test_association_retries_are_bounded() -> None:
+    adapter = make_adapter(association_failures=_ASSOCIATION_ATTEMPTS)
+    session = make_session(adapter)
+    with pytest.raises(commands.CommandFailedError):
+        await session.async_connect()
+    assert (
+        len(adapter.sent(commands.CommandCode.START_ROUTE_B)) == _ASSOCIATION_ATTEMPTS
+    )
+
+
+async def test_an_unacknowledged_transmission_is_retried() -> None:
+    adapter = make_adapter()
+    session = make_session(adapter)
+    async with session:
+        adapter.behaviour.transmit_no_ack = 1
+        reading = await session.async_read_meter()
+    assert reading.instantaneous_power == fake.EXPECTED_POWER
+    assert session.stats.echonet_retries == 1
 
 
 async def test_a_refused_identity_property_keeps_the_scaling_values() -> None:

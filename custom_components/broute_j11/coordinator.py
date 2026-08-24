@@ -63,9 +63,11 @@ class BrouteCoordinator(DataUpdateCoordinator[MeterReading]):
             update_interval=timedelta(seconds=interval),
         )
         self.session = session
-        # Entity and device identities come from the config entry, so correcting
-        # the credentials keeps the Energy dashboard's statistics history.
-        self.identifier = entry.entry_id
+        # Entity and device identities are the hashed meter MAC, so they survive
+        # both a credential correction and removing and re-adding the meter,
+        # keeping the Energy dashboard's statistics history attached. The entry
+        # ID is only a fallback for an entry created before pairing set one.
+        self.identifier = entry.unique_id or entry.entry_id
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -36,6 +36,12 @@ MIN_PORT: Final = 1
 MAX_PORT: Final = 0xFFFF
 
 RESULT_SUCCEEDED: Final = 0x01
+#: Transmission result of a Transmit Data response meaning the frame went out.
+TRANSMISSION_SUCCEEDED: Final = 0x0
+#: Transmission result meaning the destination never acknowledged the frame.
+TRANSMISSION_NO_ACK: Final = 0x5
+#: Transmission results a later attempt can still succeed at.
+RETRYABLE_TRANSMISSION_RESULTS: Final = frozenset({TRANSMISSION_NO_ACK})
 
 _HEX_DIGITS: Final = frozenset(string.hexdigits)
 _ALPHANUMERIC: Final = frozenset(string.ascii_letters + string.digits)
@@ -587,7 +593,16 @@ class TransmitResult:
     @property
     def transmission_succeeded(self) -> bool:
         """Whether the datagram was transmitted."""
-        return self.transmission_result == 0x0
+        return self.transmission_result == TRANSMISSION_SUCCEEDED
+
+    @property
+    def retryable(self) -> bool:
+        """Whether resending the datagram can still succeed.
+
+        A meter that misses one frame does not answer its ACK, which the
+        adapter reports as a transmission failure even though the link is fine.
+        """
+        return self.transmission_result in RETRYABLE_TRANSMISSION_RESULTS
 
 
 def parse_transmit_data_response(frame: Frame) -> TransmitResult:

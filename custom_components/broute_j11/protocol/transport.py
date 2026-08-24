@@ -32,6 +32,24 @@ class TransportError(Exception):
     """
 
 
+def _reason(err: Exception) -> str:
+    """Describe ``err`` without repeating anything pyserial put the path in.
+
+    pyserial embeds the device path in its messages, and a chained cause is
+    rendered by both Python and Home Assistant tracebacks, so the cause is
+    dropped and only the exception type plus the OS error text survive
+    (PRD §6.7).
+    """
+    # pyserial reuses ``strerror`` for its own formatted message, which names
+    # the port, so only a genuine OS error text is safe to repeat.
+    if isinstance(err, serial.SerialException) or not isinstance(err, OSError):
+        return type(err).__name__
+    strerror = err.strerror
+    if strerror:
+        return f"{type(err).__name__}: {strerror}"
+    return type(err).__name__
+
+
 @runtime_checkable
 class ByteTransport(Protocol):
     """A blocking, byte-oriented link to an adapter."""
@@ -89,8 +107,8 @@ class SerialTransport:
             )
         except (OSError, serial.SerialException) as err:
             raise TransportError(
-                f"the serial device could not be opened ({type(err).__name__})"
-            ) from err
+                f"the serial device could not be opened ({_reason(err)})"
+            ) from None
 
     def close(self) -> None:
         """Close the port, ignoring a port that has already gone away."""
@@ -114,8 +132,8 @@ class SerialTransport:
             return bytes(port.read(min(size, waiting) if waiting else 1))
         except (OSError, serial.SerialException) as err:
             raise TransportError(
-                f"reading from the serial device failed ({type(err).__name__})"
-            ) from err
+                f"reading from the serial device failed ({_reason(err)})"
+            ) from None
 
     def write(self, data: bytes) -> None:
         """Write ``data`` and flush it to the adapter."""
@@ -125,8 +143,8 @@ class SerialTransport:
             port.flush()
         except (OSError, serial.SerialException) as err:
             raise TransportError(
-                f"writing to the serial device failed ({type(err).__name__})"
-            ) from err
+                f"writing to the serial device failed ({_reason(err)})"
+            ) from None
 
     def _require_port(self) -> serial.Serial:
         if self._port is None:

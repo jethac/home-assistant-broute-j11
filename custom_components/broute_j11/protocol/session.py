@@ -65,6 +65,13 @@ _SCAN_DURATION_STEP: Final = 1
 _MAX_SCAN_DURATION: Final = 14
 #: How many times a fruitless scan is repeated with a longer dwell.
 _SCAN_ATTEMPTS: Final = 3
+#: Dwell time unit of the active scan: a channel is listened to for
+#: ``9.64 ms * 2**duration`` (specification §3.2.3.4).
+_DWELL_UNIT: Final = 0.00964
+#: Share of the dwell budget added so a busy adapter can still finish.
+_SCAN_MARGIN: Final = 0.5
+#: How many times an association failure restarts the whole join sequence.
+_ASSOCIATION_ATTEMPTS: Final = 3
 #: Highest transaction ID before wrapping.
 _MAX_TRANSACTION_ID: Final = 0xFFFF
 
@@ -113,6 +120,21 @@ class MeterNotFoundError(SessionError):
     """No smart meter answered the active scan."""
 
 
+class TransmissionError(SessionError):
+    """The adapter could not deliver a datagram, but a retry may work."""
+
+
+def scan_budget(duration: int, channel_mask: int) -> float:
+    """Return how long an active scan at ``duration`` needs, with margin.
+
+    The adapter dwells ``9.64 ms * 2**duration`` on every channel in the mask
+    before it reports the last result, so a fixed timeout silently truncates a
+    longer retry: 14 channels at duration 9 already take about 69 s.
+    """
+    channels = len(_channels_in_mask(channel_mask)) or 1
+    return channels * _DWELL_UNIT * 2.0**duration * (1 + _SCAN_MARGIN)
+
+
 @dataclass(frozen=True, slots=True)
 class SessionConfig:
     """Everything a session needs to reach one meter.
@@ -127,6 +149,9 @@ class SessionConfig:
     channel_mask: int = commands.ALL_CHANNELS_MASK
     command_timeout: float = 5.0
     startup_timeout: float = 15.0
+    #: How long the adapter may take to acknowledge the scan command itself.
+    #: How long the scan then runs follows from the dwell time and the channel
+    #: mask, see :func:`scan_budget`.
     scan_timeout: float = 60.0
     pana_timeout: float = 45.0
     echonet_timeout: float = 15.0
@@ -405,9 +430,9 @@ class J11Session:
         """
         cached = self._cached_network
         if cached is None:
-            return await self._async_establish_network(None)
+            return await self._async_associate(None)
         try:
-            return await self._async_establish_network(cached)
+            return await self._async_associate(cached)
         except AuthenticationError:
             raise
         except (SessionError, ProtocolError) as err:
@@ -417,7 +442,32 @@ class J11Session:
                 err,
             )
             self._cached_network = None
-        return await self._async_establish_network(None)
+        return await self._async_associate(None)
+
+    async def _async_associate(self, cached: CachedNetwork | None) -> MeterLink:
+        """Join the meter, restarting the sequence after an association failure.
+
+        A meter that answered the scan still refuses the first MAC association
+        often enough that one failure must not fail the whole setup: the adapter
+        reports result 0x0E, and the next attempt from a reset module (and a
+        fresh scan when there is no cached channel) usually succeeds.
+        """
+        for attempt in range(1, _ASSOCIATION_ATTEMPTS + 1):
+            try:
+                return await self._async_establish_network(cached)
+            except commands.CommandFailedError as err:
+                if (
+                    err.result != _MAC_CONNECTION_FAILED
+                    or attempt == _ASSOCIATION_ATTEMPTS
+                ):
+                    raise
+                _LOGGER.info(
+                    "Associating with the meter failed (%s); retrying (%s/%s)",
+                    err,
+                    attempt + 1,
+                    _ASSOCIATION_ATTEMPTS,
+                )
+        raise SessionError("the meter refused every association attempt")
 
     async def _async_establish_network(self, cached: CachedNetwork | None) -> MeterLink:
         """Run the documented Route-B start-up sequence (B-route note §3)."""
@@ -545,7 +595,13 @@ class J11Session:
             commands.CommandCode.ACTIVE_SCAN,
             timeout=self._config.scan_timeout,
         )
-        deadline = asyncio.get_running_loop().time() + self._config.scan_timeout
+        budget = scan_budget(duration, self._config.channel_mask)
+        _LOGGER.debug(
+            "Waiting up to %.1f s for the scan at duration %s to finish",
+            budget,
+            duration,
+        )
+        deadline = asyncio.get_running_loop().time() + budget
         scanned: set[int] = set()
         expected = _channels_in_mask(self._config.channel_mask)
         while True:
@@ -634,14 +690,14 @@ class J11Session:
     async def _async_get_properties(
         self, epcs: Sequence[Epc], *, required: bool = True
     ) -> dict[int, bytes]:
-        """Get ``epcs`` from the meter, retrying a timed-out transaction."""
+        """Get ``epcs`` from the meter, retrying a lost transaction."""
         last_error: Exception | None = None
         for attempt in range(1, self._config.echonet_attempts + 1):
             if attempt > 1:
                 self._stats.echonet_retries += 1
             try:
                 values = await self._async_echonet_get(epcs)
-            except (SessionTimeoutError, EchonetFrameError) as err:
+            except (SessionTimeoutError, TransmissionError, EchonetFrameError) as err:
                 last_error = err
                 continue
             missing = [epc for epc in epcs if not values.get(epc)]
@@ -672,10 +728,13 @@ class J11Session:
             )
         )
         if not result.transmission_succeeded and not result.queued:
-            raise SessionError(
+            message = (
                 f"the adapter could not transmit the request "
                 f"(result 0x{result.transmission_result:X})"
             )
+            if result.retryable:
+                raise TransmissionError(message)
+            raise SessionError(message)
         return await self._async_await_get_response(transaction_id)
 
     async def _async_await_get_response(self, transaction_id: int) -> dict[int, bytes]:
@@ -885,6 +944,9 @@ class J11Session:
 
 #: Response result meaning the adapter already holds these credentials.
 _CREDENTIALS_ALREADY_SET: Final = 0x58
+#: Response result meaning the MAC association with the meter failed; a later
+#: attempt from a reset module regularly succeeds (specification Table 34).
+_MAC_CONNECTION_FAILED: Final = 0x0E
 #: How many times :meth:`J11Session.async_ensure_connected` rebuilds the link
 #: before giving up and letting the coordinator report the entry unavailable.
 _RECONNECT_ATTEMPTS: Final = 3

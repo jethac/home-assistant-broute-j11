@@ -6,6 +6,8 @@ slice and the error translation are all exercised without hardware.
 
 from __future__ import annotations
 
+import traceback
+
 import pytest
 import serial
 
@@ -18,6 +20,16 @@ from custom_components.broute_j11.protocol.transport import (
 )
 
 DEVICE = "/dev/serial/by-id/synthetic-adapter"
+
+
+def rendered(err: BaseException) -> str:
+    """Return ``err`` as Home Assistant would log it, causes included.
+
+    A chained pyserial error keeps naming the port in the traceback even when
+    the message does not, so the whole rendering has to stay path-free
+    (PRD §6.7).
+    """
+    return "".join(traceback.format_exception(err))
 
 
 class StubPort:
@@ -112,7 +124,7 @@ def test_open_reports_a_missing_device(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(TransportError, match="could not be opened") as raised:
         SerialTransport(DEVICE).open()
     # The path embeds the adapter's USB serial number (PRD §6.7).
-    assert DEVICE not in str(raised.value)
+    assert DEVICE not in rendered(raised.value)
 
 
 def test_read_drains_the_buffered_burst(port: StubPort) -> None:
@@ -135,6 +147,33 @@ def test_an_idle_read_blocks_for_a_single_byte(port: StubPort) -> None:
     assert transport.read() == b""
 
 
+def test_an_os_error_keeps_its_reason_without_the_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def factory(**_: object) -> StubPort:
+        raise FileNotFoundError(2, "No such file or directory", DEVICE)
+
+    monkeypatch.setattr(transport_module.serial, "Serial", factory)
+    with pytest.raises(TransportError) as raised:
+        SerialTransport(DEVICE).open()
+    assert "No such file or directory" in str(raised.value)
+    assert DEVICE not in rendered(raised.value)
+
+
+def test_a_pyserial_error_that_names_the_port_in_strerror_is_redacted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def factory(**_: object) -> StubPort:
+        # pyserial's POSIX backend passes its own formatted message, which
+        # names the port, as the OSError strerror.
+        raise serial.SerialException(2, f"could not open port {DEVICE}")
+
+    monkeypatch.setattr(transport_module.serial, "Serial", factory)
+    with pytest.raises(TransportError) as raised:
+        SerialTransport(DEVICE).open()
+    assert DEVICE not in rendered(raised.value)
+
+
 def test_a_failing_read_is_reported(port: StubPort) -> None:
     transport = SerialTransport(DEVICE)
     transport.open()
@@ -142,7 +181,7 @@ def test_a_failing_read_is_reported(port: StubPort) -> None:
     port.buffer += b"x"
     with pytest.raises(TransportError, match="reading from") as raised:
         transport.read()
-    assert DEVICE not in str(raised.value)
+    assert DEVICE not in rendered(raised.value)
 
 
 def test_write_flushes_the_port(port: StubPort) -> None:
@@ -159,7 +198,7 @@ def test_a_failing_write_is_reported(port: StubPort) -> None:
     port.fail_on.add("write")
     with pytest.raises(TransportError, match="writing to") as raised:
         transport.write(b"hello")
-    assert DEVICE not in str(raised.value)
+    assert DEVICE not in rendered(raised.value)
 
 
 def test_using_a_closed_transport_is_an_error(port: StubPort) -> None:
@@ -168,8 +207,8 @@ def test_using_a_closed_transport_is_an_error(port: StubPort) -> None:
         transport.read()
     with pytest.raises(TransportError, match="is not open") as write_error:
         transport.write(b"hello")
-    assert DEVICE not in str(read_error.value)
-    assert DEVICE not in str(write_error.value)
+    assert DEVICE not in rendered(read_error.value)
+    assert DEVICE not in rendered(write_error.value)
 
 
 def test_close_releases_the_port_once(port: StubPort) -> None:

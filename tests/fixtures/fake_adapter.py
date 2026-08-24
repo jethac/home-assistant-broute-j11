@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 import threading
+import time
 from typing import Final
 
 from custom_components.broute_j11.protocol.codec import (
@@ -46,6 +47,12 @@ METER_RSSI_BYTE: Final = 0xDE
 
 _SUCCESS: Final = 0x01
 _FAILED: Final = 0x02
+#: Response result the adapter returns when the MAC association fails.
+MAC_CONNECTION_FAILED: Final = 0x0E
+#: Transmission result nibble meaning the destination never acknowledged.
+NO_ACK: Final = 0x05
+#: Dwell time unit of a real active scan: 9.64 ms * 2**duration per channel.
+DWELL_UNIT: Final = 0.00964
 #: Response result the adapter returns when the credentials were already set.
 CREDENTIALS_ALREADY_SET: Final = 0x58
 
@@ -80,8 +87,14 @@ class AdapterBehaviour:
     #: Scans that stay silent before the meter answers, as a short dwell does.
     silent_scans: int = 0
     channel_mask: int = ALL_CHANNELS_MASK
+    #: Scans that dwell for the requested duration instead of answering at once.
+    dwell: bool = False
     #: Route-B start requests that fail before one succeeds.
     route_b_failures: int = 0
+    #: Route-B start requests that fail to associate (0x0E) before one succeeds.
+    association_failures: int = 0
+    #: Transmissions the meter does not acknowledge before one gets through.
+    transmit_no_ack: int = 0
     pana_result: int = _SUCCESS
     credentials_result: int = _SUCCESS
     fail_open: bool = False
@@ -116,6 +129,7 @@ class FakeAdapter:
         self._dropped = 0
         self._scans = 0
         self._route_b_attempts = 0
+        self._unacknowledged = 0
 
     # -- transport interface -------------------------------------------------
 
@@ -251,8 +265,25 @@ class FakeAdapter:
         self.respond(frame.command_code, bytes([_SUCCESS]))
         self._scans += 1
         answers = self._scans > self.behaviour.silent_scans
+        duration = frame.data[0]
         mask = int.from_bytes(frame.data[1:5], "big")
-        for channel in sorted(bit for bit in range(32) if mask >> bit & 1):
+        channels = sorted(bit for bit in range(32) if mask >> bit & 1)
+        if self.behaviour.dwell:
+            # A real adapter reports each channel only after dwelling on it, so
+            # the results arrive over the whole scan duration.
+            thread = threading.Thread(
+                target=self._scan_channels,
+                args=(channels, answers, DWELL_UNIT * 2**duration),
+                daemon=True,
+            )
+            thread.start()
+            return
+        self._scan_channels(channels, answers, 0.0)
+
+    def _scan_channels(self, channels: list[int], answers: bool, dwell: float) -> None:
+        for channel in channels:
+            if dwell:
+                time.sleep(dwell)
             if answers and channel == self.behaviour.beacon_channel:
                 self.notify(
                     NotificationCode.ACTIVE_SCAN_RESULT,
@@ -266,8 +297,12 @@ class FakeAdapter:
 
     def _handle_route_b(self, frame: Frame) -> None:
         self._route_b_attempts += 1
-        if self._route_b_attempts <= self.behaviour.route_b_failures:
+        failures = self.behaviour.route_b_failures
+        if self._route_b_attempts <= failures:
             self.respond(frame.command_code, bytes([_FAILED]))
+            return
+        if self._route_b_attempts <= failures + self.behaviour.association_failures:
+            self.respond(frame.command_code, bytes([MAC_CONNECTION_FAILED]))
             return
         self.respond(
             frame.command_code,
@@ -302,6 +337,10 @@ class FakeAdapter:
 
     def _handle_transmit(self, frame: Frame) -> None:
         payload = frame.data[22:]
+        if self._unacknowledged < self.behaviour.transmit_no_ack:
+            self._unacknowledged += 1
+            self.respond(frame.command_code, bytes([_SUCCESS, NO_ACK]) + payload[:5])
+            return
         self.respond(frame.command_code, bytes([_SUCCESS, 0x00]) + payload[:5])
         if self._dropped < self.behaviour.drop_meter_responses:
             self._dropped += 1

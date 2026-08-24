@@ -38,6 +38,9 @@ ENTRY_DATA = {
 #: Timeouts short enough that failure paths do not stall the test suite.
 FAST_TIMEOUTS = {
     "command_timeout": 0.5,
+    # The scan deadline follows the dwell time, so the shortest dwell keeps a
+    # fruitless scan short.
+    "scan_duration": 1,
     "startup_timeout": 0.5,
     "scan_timeout": 1.0,
     "pana_timeout": 0.5,
