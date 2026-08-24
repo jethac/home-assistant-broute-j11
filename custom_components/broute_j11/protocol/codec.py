@@ -39,8 +39,10 @@ _UNIQUE_CODE_BYTES: Final = tuple(
 )
 
 #: Response command codes are the request code with bit 13 set, notifications
-#: have bits 13 and 14 set.
+#: have bits 13 and 14 set, and the result of a long-running command (the
+#: active scan) has bit 14 set on its own.
 _RESPONSE_FLAG: Final = 0x2000
+_SCAN_RESULT_FLAG: Final = 0x4000
 _NOTIFICATION_FLAG: Final = 0x6000
 _CATEGORY_MASK: Final = 0xE000
 
@@ -80,6 +82,18 @@ class Frame:
         """Whether the frame was sent spontaneously by the adapter."""
         return self.command_code & _CATEGORY_MASK == _NOTIFICATION_FLAG
 
+    @property
+    def is_event(self) -> bool:
+        """Whether the frame arrived outside a request/response transaction.
+
+        Scan results (``0x4051``) and notifications (``0x6...``) both arrive
+        without a matching outstanding request.
+        """
+        return self.command_code & _CATEGORY_MASK in (
+            _SCAN_RESULT_FLAG,
+            _NOTIFICATION_FLAG,
+        )
+
     def encode(self) -> bytes:
         """Serialise the frame, computing both checksums."""
         _validate_encodable(self.command_code, self.data, self.unique_code)
@@ -113,6 +127,11 @@ def encode_request(command_code: int, data: bytes = b"") -> bytes:
     return Frame(
         command_code=command_code, data=data, unique_code=REQUEST_UNIQUE_CODE
     ).encode()
+
+
+def response_code(command_code: int) -> int:
+    """Return the command code the adapter answers ``command_code`` with."""
+    return command_code | _RESPONSE_FLAG
 
 
 def decode_frame(raw: bytes) -> Frame:
