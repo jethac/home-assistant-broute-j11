@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your B-route adapter",
+        "description": "Select the USB adapter and enter the Route-B authentication ID and password your electricity retailer sent you.",
+        "data": {
+          "device": "Serial device",
+          "auth_id": "Route-B authentication ID",
+          "password": "Route-B password"
+        },
+        "data_description": {
+          "device": "Prefer a /dev/serial/by-id/... path: it survives re-plugging.",
+          "auth_id": "32 hexadecimal characters.",
+          "password": "12 letters and digits."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth_id": "The authentication ID must be 32 hexadecimal characters.",
+      "invalid_password": "The password must be 12 letters and digits.",
+      "cannot_connect": "The serial device could not be opened. Check that it is plugged in and passed through to Home Assistant.",
+      "invalid_auth": "The meter rejected these credentials.",
+      "no_meter": "No smart meter answered the scan. Check the credentials and the distance to the meter.",
+      "timeout": "The adapter stopped responding. Unplug it, plug it back in and try again.",
+      "unknown": "Pairing failed for an unexpected reason. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This smart meter is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling",
+        "data": {
+          "scan_interval": "Seconds between meter readings"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "instantaneous_power": { "name": "Instantaneous power" },
+      "instantaneous_current_r": { "name": "Instantaneous current R phase" },
+      "instantaneous_current_t": { "name": "Instantaneous current T phase" },
+      "cumulative_forward_energy": { "name": "Cumulative energy consumed" },
+      "cumulative_reverse_energy": { "name": "Cumulative energy returned" }
+    }
+  }
+}

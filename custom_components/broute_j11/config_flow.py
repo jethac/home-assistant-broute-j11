@@ -1,0 +1,176 @@
+"""Config and options flow for the B-route Smart Meter (J11) integration."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.helpers import selector
+from serial.tools import list_ports
+import voluptuous as vol
+
+from .const import (
+    CONF_AUTH_ID,
+    CONF_DEVICE,
+    CONF_PASSWORD,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+)
+from .coordinator import BrouteConfigEntry, meter_identifier
+from .protocol.codec import ProtocolError
+from .protocol.commands import (
+    CredentialFormatError,
+    validate_auth_id,
+    validate_password,
+)
+from .protocol.session import (
+    AuthenticationError,
+    J11Session,
+    MeterNotFoundError,
+    SessionConfig,
+    SessionError,
+    SessionTimeoutError,
+)
+from .protocol.transport import SerialTransport, TransportError
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Pair one adapter and meter, validating input before touching hardware."""
+
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for a serial device and the Route-B credentials, then pair."""
+        errors: dict[str, str] = {}
+        device = ""
+        if user_input is not None:
+            device = str(user_input[CONF_DEVICE]).strip()
+            credentials = self._validate_credentials(user_input, errors)
+            if credentials is not None:
+                auth_id, password = credentials
+                await self.async_set_unique_id(meter_identifier(auth_id))
+                self._abort_if_unique_id_configured()
+                self._async_abort_entries_match({CONF_DEVICE: device})
+                error = await self._async_try_pairing(
+                    device, SessionConfig(auth_id=auth_id, password=password)
+                )
+                if error is None:
+                    return self.async_create_entry(
+                        title="Smart meter",
+                        data={
+                            CONF_DEVICE: device,
+                            CONF_AUTH_ID: auth_id,
+                            CONF_PASSWORD: password,
+                        },
+                    )
+                errors["base"] = error
+        return self.async_show_form(
+            step_id="user",
+            data_schema=await self._async_schema(device),
+            errors=errors,
+        )
+
+    async def _async_schema(self, device: str) -> vol.Schema:
+        """Build the pairing schema, offering the discovered serial devices."""
+        ports = await self.hass.async_add_executor_job(list_ports.comports)
+        options = [
+            selector.SelectOptionDict(
+                value=port.device, label=f"{port.description or port.device}"
+            )
+            for port in ports
+        ]
+        return vol.Schema(
+            {
+                vol.Required(
+                    CONF_DEVICE, description={"suggested_value": device or None}
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=options,
+                        custom_value=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(CONF_AUTH_ID): str,
+                vol.Required(CONF_PASSWORD): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                ),
+            }
+        )
+
+    def _validate_credentials(
+        self, user_input: dict[str, Any], errors: dict[str, str]
+    ) -> tuple[str, str] | None:
+        """Check the credential format locally, without contacting hardware."""
+        auth_id = ""
+        password = ""
+        try:
+            auth_id = validate_auth_id(str(user_input[CONF_AUTH_ID]))
+        except CredentialFormatError:
+            errors[CONF_AUTH_ID] = "invalid_auth_id"
+        try:
+            password = validate_password(str(user_input[CONF_PASSWORD]).strip())
+        except CredentialFormatError:
+            errors[CONF_PASSWORD] = "invalid_password"
+        if errors:
+            return None
+        return auth_id, password
+
+    async def _async_try_pairing(
+        self, device: str, config: SessionConfig
+    ) -> str | None:
+        """Return an error key, or ``None`` when pairing succeeded."""
+        session = J11Session(SerialTransport(device), config)
+        try:
+            await session.async_connect()
+        except TransportError:
+            return "cannot_connect"
+        except AuthenticationError:
+            return "invalid_auth"
+        except MeterNotFoundError:
+            return "no_meter"
+        except SessionTimeoutError:
+            return "timeout"
+        except (SessionError, ProtocolError) as err:
+            _LOGGER.debug("Pairing failed: %s", err)
+            return "unknown"
+        finally:
+            await session.async_close()
+        return None
+
+    @staticmethod
+    def async_get_options_flow(entry: BrouteConfigEntry) -> BrouteOptionsFlow:
+        """Return the options flow for the polling interval."""
+        return BrouteOptionsFlow()
+
+
+class BrouteOptionsFlow(OptionsFlow):
+    """Let the user change how often the meter is polled."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show and store the polling interval."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        current = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SCAN_INTERVAL, default=current): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                    )
+                }
+            ),
+        )

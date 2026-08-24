@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bルートアダプターの接続",
+        "description": "USBアダプターを選択し、電力会社から通知されたBルート認証IDとパスワードを入力してください。",
+        "data": {
+          "device": "シリアルデバイス",
+          "auth_id": "Bルート認証ID",
+          "password": "Bルートパスワード"
+        },
+        "data_description": {
+          "device": "再接続後も変わらない /dev/serial/by-id/... のパスを推奨します。",
+          "auth_id": "16進数32文字です。",
+          "password": "英数字12文字です。"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth_id": "認証IDは16進数32文字で入力してください。",
+      "invalid_password": "パスワードは英数字12文字で入力してください。",
+      "cannot_connect": "シリアルデバイスを開けませんでした。接続とHome Assistantへの受け渡しを確認してください。",
+      "invalid_auth": "スマートメーターが認証情報を拒否しました。",
+      "no_meter": "スキャンに応答したスマートメーターがありません。認証情報とメーターまでの距離を確認してください。",
+      "timeout": "アダプターが応答しません。USBを抜き差ししてからもう一度お試しください。",
+      "unknown": "想定外の理由でペアリングに失敗しました。ログを確認してください。"
+    },
+    "abort": {
+      "already_configured": "このスマートメーターはすでに設定されています。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "取得間隔",
+        "data": {
+          "scan_interval": "メーター取得間隔（秒）"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "instantaneous_power": { "name": "瞬時電力" },
+      "instantaneous_current_r": { "name": "瞬時電流（R相）" },
+      "instantaneous_current_t": { "name": "瞬時電流（T相）" },
+      "cumulative_forward_energy": { "name": "積算電力量（買電）" },
+      "cumulative_reverse_energy": { "name": "積算電力量（売電）" }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+"""Tests for config entry setup, unload and reload."""
+
+from __future__ import annotations
+
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.broute_j11.const import CONF_SCAN_INTERVAL
+
+from .fixtures.fake_adapter import AdapterBehaviour, FakeAdapter
+
+
+async def test_setup_pairs_and_polls(
+    hass: HomeAssistant, adapter: FakeAdapter, setup_integration: MockConfigEntry
+) -> None:
+    assert setup_integration.state is ConfigEntryState.LOADED
+    assert setup_integration.runtime_data.data.instantaneous_power is not None
+    assert adapter.opens == 1
+
+
+async def test_unload_releases_the_serial_port(
+    hass: HomeAssistant, adapter: FakeAdapter, setup_integration: MockConfigEntry
+) -> None:
+    assert await hass.config_entries.async_unload(setup_integration.entry_id)
+    await hass.async_block_till_done()
+    assert setup_integration.state is ConfigEntryState.NOT_LOADED
+    assert adapter.closes >= 1
+
+
+async def test_changing_options_reloads_the_entry(
+    hass: HomeAssistant, adapter: FakeAdapter, setup_integration: MockConfigEntry
+) -> None:
+    hass.config_entries.async_update_entry(
+        setup_integration, options={CONF_SCAN_INTERVAL: 90}
+    )
+    await hass.async_block_till_done()
+    assert setup_integration.state is ConfigEntryState.LOADED
+    assert setup_integration.runtime_data.update_interval is not None
+    assert setup_integration.runtime_data.update_interval.total_seconds() == 90
+    assert adapter.opens == 2
+
+
+async def test_a_missing_adapter_defers_setup(
+    hass: HomeAssistant,
+    behaviour: AdapterBehaviour,
+    adapter: FakeAdapter,
+    config_entry: MockConfigEntry,
+) -> None:
+    behaviour.fail_open = True
+    config_entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_rejected_credentials_ask_for_reauthentication(
+    hass: HomeAssistant,
+    behaviour: AdapterBehaviour,
+    adapter: FakeAdapter,
+    config_entry: MockConfigEntry,
+) -> None:
+    behaviour.pana_result = 0x02
+    config_entry.add_to_hass(hass)
+    assert not await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert config_entry.state is ConfigEntryState.SETUP_ERROR
