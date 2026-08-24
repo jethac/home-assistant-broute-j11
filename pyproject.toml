@@ -67,7 +67,7 @@ combine-as-imports = true
 
 [tool.mypy]
 python_version = "3.13"
-files = ["custom_components/broute_j11", "tools"]
+files = ["custom_components/broute_j11"]
 strict = true
 warn_unreachable = true
 
