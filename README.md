@@ -4,7 +4,9 @@ A Home Assistant custom integration for Japanese B-route smart meters connected 
 
 ## Status
 
-The integration is implemented and covered by automated tests against an in-memory adapter that speaks the real binary protocol. It has not yet been validated against physical hardware; see [Hardware validation](#hardware-validation).
+The integration has been validated with a physical RATOC Systems RS-WSUHA-J11, a live B-route meter, and Home Assistant Container 2026.5.1. Pairing completed successfully, all five meter entities produced readings, the config entry survived a Home Assistant restart, and the cumulative import and export sensors were accepted by the Energy dashboard.
+
+Automated tests also cover the integration against an in-memory adapter that speaks the real binary protocol. See [Hardware validation](#hardware-validation) for the opt-in test procedure.
 
 The important distinction is that J11 adapters use ROHM's binary UART protocol. They do not accept the text-based `SK...` commands used by BP35A1, BP35C2, RS-WSUHA-P, and many existing B-route tools. A driver that waits for an `SKVER` response will appear to hang even when an RS-WSUHA-J11 is working normally.
 
@@ -50,13 +52,15 @@ Forward energy is intended for grid consumption. Reverse energy is intended for 
 3. Go to **Settings → Devices & services → Add integration** and choose **B-route Smart Meter (J11)**.
 4. Select the adapter's serial device, then enter the Route-B authentication ID (32 hexadecimal characters) and password (12 letters and digits) your electricity retailer sent you.
 
-Pairing takes up to a minute: the adapter is reset, scans every channel for your meter, and completes a PANA authentication before the entry is created.
+Pairing commonly takes one or two minutes: the adapter is reset, scans every channel for your meter, retries with a longer dwell time when necessary, and completes PANA authentication before the entry is created. Do not cancel the flow merely because the first scan found no meter.
 
 Prefer a stable path such as `/dev/serial/by-id/usb-RATOC_Systems__Ltd._RS-WSUHA-J11-if00-port0` over `/dev/ttyUSB0`. The dropdown lists what is currently attached, and any path can be typed in directly.
 
 ### Polling
 
-The meter is read every 60 seconds by default. Change it under the integration's **Configure** menu; 30 to 300 seconds is accepted. Meters answer slowly, so shorter intervals mostly increase the chance of a timeout.
+The meter is read every 60 seconds by default. Change it under the integration's **Configure** menu; 30 to 300 seconds is accepted.
+
+Start with **30 seconds** on the RS-WSUHA-J11. During physical validation, a 60-second interval consistently reached an adapter or meter idle boundary: the first reading succeeded, then later transmit commands timed out. At 30 seconds, repeated polls completed without command timeouts. This may vary with adapter firmware and meter behaviour, but 30 seconds is the known-good setting.
 
 ## USB passthrough
 
@@ -87,6 +91,8 @@ The cumulative sensors are `total_increasing` energy sensors in kWh, which is wh
 
 Use the cumulative sensors, not instantaneous power: the meter's own counters are the authoritative totals, and long-term statistics are generated from them. Meters without a reverse-energy counter leave that sensor unavailable, which is expected.
 
+B-route measures electricity crossing the utility meter. It therefore provides **grid consumption** and **return to grid**, not the solar panels' gross generation. Keep a separate inverter or ECHONET Lite production sensor under **Solar panels** if you want Home Assistant to show total solar production.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -95,6 +101,7 @@ Use the cumulative sensors, not instantaneous power: the meter's own counters ar
 | "The meter rejected these credentials" | The authentication ID or password is wrong. They are meter-specific and are re-issued by the retailer; the integration deliberately stops retrying so the meter does not lock you out. |
 | "No smart meter answered the scan" | The credentials belong to a different meter, or the adapter is too far away or behind too much metal. Try the adapter on a USB extension closer to the meter. |
 | "The adapter stopped responding" | The adapter's firmware is wedged. Unplug it, wait a few seconds, plug it back in and reload the entry. |
+| The first reading works, then every sensor becomes unavailable after about a minute | Set the polling interval to 30 seconds under the integration's **Configure** menu, then reload the entry. A 60-second interval reached an idle boundary during RS-WSUHA-J11 hardware validation. |
 | Sensors become unavailable, then recover | Normal: the radio link or PANA session dropped and the integration reconnected with backoff. |
 | Sensors stay unavailable | Check the log for the last session error, and collect diagnostics from the integration's menu. Diagnostics are redacted and safe to attach to an issue. |
 | Nothing works and the log mentions `SKVER` or text commands | Another integration is competing for the adapter. J11 hardware does not speak the text protocol. |
@@ -117,7 +124,7 @@ CI cannot prove radio behaviour, so there is an opt-in tool that pairs with a re
 BROUTE_J11_DEVICE=/dev/serial/by-id/usb-... \
 BROUTE_J11_AUTH_ID=... \
 BROUTE_J11_PASSWORD=... \
-.venv/bin/python tools/validate_hardware.py --polls 3 --interval 60
+.venv/bin/python tools/validate_hardware.py --polls 3 --interval 30
 ```
 
 It reports the channel, RSSI, adapter firmware, meter scaling, one line per reading and the protocol counters, and exits non-zero on failure.
