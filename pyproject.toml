@@ -1,0 +1,76 @@
+[project]
+name = "home-assistant-broute-j11"
+version = "0.1.0"
+description = "Home Assistant custom integration for B-route smart meters behind ROHM BP35C0-J11 Wi-SUN adapters"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.13"
+dependencies = ["pyserial>=3.5"]
+
+[project.optional-dependencies]
+dev = [
+    "homeassistant==2026.2.3",
+    "mypy==1.18.2",
+    "pytest-homeassistant-custom-component==0.13.316",
+    "ruff==0.14.0",
+]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-p no:randomly"
+markers = ["hardware: opt-in tests that need a real RS-WSUHA-J11 adapter"]
+
+[tool.coverage.run]
+branch = true
+source = ["custom_components/broute_j11"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "ASYNC",
+    "B",
+    "C4",
+    "D",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PL",
+    "RET",
+    "RUF",
+    "SIM",
+    "T20",
+    "TRY",
+    "UP",
+    "W",
+]
+ignore = ["D203", "D213", "TRY003", "TRY400"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D103", "PLR2004"]
+"tools/*" = ["T201"]
+"scripts/*" = ["T201"]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true
+
+[tool.mypy]
+python_version = "3.13"
+files = ["custom_components/broute_j11"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = ["serial.*"]
+ignore_missing_imports = true

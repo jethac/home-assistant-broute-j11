@@ -1,0 +1,12 @@
+{
+  "domain": "broute_j11",
+  "name": "B-route Smart Meter (J11)",
+  "codeowners": ["@jethac"],
+  "config_flow": true,
+  "documentation": "https://github.com/jethac/home-assistant-broute-j11",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/jethac/home-assistant-broute-j11/issues",
+  "requirements": ["pyserial>=3.5"],
+  "version": "0.1.0"
+}
