@@ -262,7 +262,6 @@ class FakeAdapter:
         self.respond(frame.command_code, bytes([result]))
 
     def _handle_scan(self, frame: Frame) -> None:
-        self.respond(frame.command_code, bytes([_SUCCESS]))
         self._scans += 1
         answers = self._scans > self.behaviour.silent_scans
         duration = frame.data[0]
@@ -272,13 +271,30 @@ class FakeAdapter:
             # A real adapter reports each channel only after dwelling on it, so
             # the results arrive over the whole scan duration.
             thread = threading.Thread(
-                target=self._scan_channels,
-                args=(channels, answers, DWELL_UNIT * 2**duration),
+                target=self._run_scan,
+                args=(
+                    frame.command_code,
+                    channels,
+                    answers,
+                    DWELL_UNIT * 2**duration,
+                ),
                 daemon=True,
             )
             thread.start()
             return
-        self._scan_channels(channels, answers, 0.0)
+        self._run_scan(frame.command_code, channels, answers, 0.0)
+
+    def _run_scan(
+        self, command: int, channels: list[int], answers: bool, dwell: float
+    ) -> None:
+        """Report the channels, then answer the request as the adapter does.
+
+        ROHM's sequence is request, per-channel result notifications, response:
+        the 0x0051 response reports the finished scan rather than acknowledging
+        the command, so it must not arrive before the last notification.
+        """
+        self._scan_channels(channels, answers, dwell)
+        self.respond(command, bytes([_SUCCESS]))
 
     def _scan_channels(self, channels: list[int], answers: bool, dwell: float) -> None:
         for channel in channels:

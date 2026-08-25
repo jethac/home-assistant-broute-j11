@@ -586,6 +586,19 @@ class J11Session:
         """Run one active scan for the configured authentication ID."""
         while not self._scan_results.empty():
             self._scan_results.get_nowait()
+        # The adapter answers ACTIVE_SCAN only once it has dwelled on every
+        # channel (ROHM's request, result notifications, response order), so
+        # both waits carry the dwell budget: the configured timeout would cut
+        # a long scan short before its response ever arrives.
+        budget = max(
+            scan_budget(duration, self._config.channel_mask),
+            self._config.scan_timeout,
+        )
+        _LOGGER.debug(
+            "Waiting up to %.1f s for the scan at duration %s to finish",
+            budget,
+            duration,
+        )
         await self._async_request(
             commands.active_scan_request(
                 duration=duration,
@@ -593,13 +606,7 @@ class J11Session:
                 auth_id=self._config.auth_id,
             ),
             commands.CommandCode.ACTIVE_SCAN,
-            timeout=self._config.scan_timeout,
-        )
-        budget = scan_budget(duration, self._config.channel_mask)
-        _LOGGER.debug(
-            "Waiting up to %.1f s for the scan at duration %s to finish",
-            budget,
-            duration,
+            timeout=budget,
         )
         deadline = asyncio.get_running_loop().time() + budget
         scanned: set[int] = set()

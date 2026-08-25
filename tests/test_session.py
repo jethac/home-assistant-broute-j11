@@ -338,6 +338,25 @@ async def test_a_scan_that_dwells_on_every_channel_is_not_cut_short() -> None:
     assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
 
 
+async def test_the_scan_request_waits_for_the_whole_dwell() -> None:
+    """The request wait is the dwell budget, not the configured scan timeout.
+
+    The adapter answers 0x0051 when the scan has finished rather than when it
+    starts, so a duration-9 scan across every channel answers after about 69 s
+    and the default one-minute timeout would fail it. The fake dwells at a
+    shorter duration to keep the test quick, with a scan timeout well below the
+    dwell so a fixed request timeout cannot pass.
+    """
+    default = SessionConfig(auth_id=AUTH_ID, password=PASSWORD)
+    assert scan_budget(9, default.channel_mask) > default.scan_timeout
+    adapter = make_adapter(dwell=True)
+    config = make_config(scan_duration=3, scan_timeout=0.05, command_timeout=0.05)
+    session = make_session(adapter, config)
+    async with session:
+        assert session.connected
+    assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+
+
 async def test_a_failed_association_is_retried_from_a_fresh_scan() -> None:
     adapter = make_adapter(association_failures=1)
     session = make_session(adapter)
