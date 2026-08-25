@@ -94,11 +94,15 @@ class BrouteConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             for port in ports
         ]
+        device_key: vol.Marker = vol.Required(CONF_DEVICE)
+        if device or len(options) == 1:
+            device_key = vol.Optional(
+                CONF_DEVICE,
+                default=device or options[0]["value"],
+            )
         return vol.Schema(
             {
-                vol.Required(
-                    CONF_DEVICE, description={"suggested_value": device or None}
-                ): selector.SelectSelector(
+                device_key: selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=options,
                         custom_value=True,

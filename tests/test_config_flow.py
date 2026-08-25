@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from types import SimpleNamespace
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from serial.tools import list_ports
+import voluptuous_serialize
 
 from custom_components.broute_j11.const import (
     CONF_AUTH_ID,
@@ -58,6 +61,27 @@ async def start_flow(hass: HomeAssistant) -> str:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     return result["flow_id"]
+
+
+async def test_the_only_detected_adapter_is_a_real_form_default(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Submitting credentials alone must use the sole detected serial port."""
+    monkeypatch.setattr(
+        list_ports,
+        "comports",
+        lambda: [SimpleNamespace(device=DEVICE, description="Synthetic adapter")],
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    validated = result["data_schema"]({CONF_AUTH_ID: AUTH_ID, CONF_PASSWORD: PASSWORD})
+    assert validated[CONF_DEVICE] == DEVICE
+    serialized = voluptuous_serialize.convert(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    device_field = next(item for item in serialized if item["name"] == CONF_DEVICE)
+    assert device_field["required"] is False
 
 
 async def test_pairing_creates_an_entry(
