@@ -27,8 +27,8 @@ def test_runtime_imports_come_from_the_installed_library() -> None:
     assert sensor.MeterReading is broute_j11.MeterReading
 
 
-def test_integration_does_not_bundle_protocol_modules() -> None:
+def test_integration_does_not_bundle_a_protocol_package() -> None:
     """Protocol implementation has one owner: the installed library."""
     component_dir = Path(integration.__file__).parent
 
-    assert not list((component_dir / "protocol").glob("*.py"))
+    assert not (component_dir / "protocol").exists()
