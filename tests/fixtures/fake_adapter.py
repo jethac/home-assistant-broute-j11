@@ -100,6 +100,8 @@ class AdapterBehaviour:
     fail_open: bool = False
     fail_read_after: int | None = None
     silent_commands: set[int] = field(default_factory=set)
+    #: Number of upcoming responses to suppress per command.
+    silent_command_responses: dict[int, int] = field(default_factory=dict)
     silent_notifications: set[int] = field(default_factory=set)
     line_noise: bytes = b""
     send_instance_list: bool = False
@@ -204,6 +206,10 @@ class FakeAdapter:
     def respond(self, command: int, data: bytes) -> None:
         """Push a response frame, unless the behaviour suppresses it."""
         if command in self.behaviour.silent_commands:
+            return
+        remaining = self.behaviour.silent_command_responses.get(command, 0)
+        if remaining > 0:
+            self.behaviour.silent_command_responses[command] = remaining - 1
             return
         self.emit(
             Frame(

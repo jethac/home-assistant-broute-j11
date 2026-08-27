@@ -28,6 +28,7 @@ from custom_components.broute_j11.protocol.session import (
     SessionConfig,
     SessionError,
     SessionTimeoutError,
+    TransmissionError,
     scan_budget,
 )
 from custom_components.broute_j11.protocol.transport import TransportError
@@ -210,6 +211,71 @@ async def test_read_meter_gives_up_after_the_configured_attempts() -> None:
         with pytest.raises(SessionTimeoutError):
             await session.async_read_meter()
     assert session.stats.timeouts >= 2
+
+
+async def test_read_meter_rebuilds_the_session_after_exhausted_no_ack() -> None:
+    adapter = make_adapter()
+    session = make_session(adapter, make_config(echonet_attempts=2))
+    await session.async_connect()
+    try:
+        adapter.behaviour.transmit_no_ack = 2
+        reading = await session.async_read_meter()
+        assert reading.instantaneous_power == fake.EXPECTED_POWER
+        assert adapter.opens == 2
+        assert adapter.closes == 1
+        assert session.stats.connects == 2
+        assert session.stats.reconnects == 1
+        assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+    finally:
+        await session.async_close()
+
+
+async def test_read_meter_rebuilds_the_session_after_silent_transmit_command() -> None:
+    adapter = make_adapter()
+    session = make_session(
+        adapter,
+        make_config(command_timeout=0.05, echonet_attempts=2),
+    )
+    await session.async_connect()
+    try:
+        adapter.behaviour.silent_command_responses[
+            commands.CommandCode.TRANSMIT_DATA
+        ] = 2
+        reading = await session.async_read_meter()
+        assert reading.instantaneous_power == fake.EXPECTED_POWER
+        assert adapter.opens == 2
+        assert adapter.closes == 1
+        assert session.stats.connects == 2
+        assert session.stats.reconnects == 1
+        assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+    finally:
+        await session.async_close()
+
+
+async def test_failed_recovery_read_leaves_the_session_disconnected() -> None:
+    adapter = make_adapter()
+    session = make_session(adapter, make_config(echonet_attempts=2))
+    await session.async_connect()
+    try:
+        # Two failures exhaust the original read, two are consumed by the
+        # reconnect's best-effort profile read, and two exhaust recovery.
+        adapter.behaviour.transmit_no_ack = 6
+        with pytest.raises(TransmissionError):
+            await session.async_read_meter()
+
+        assert not session.connected
+        assert adapter.opens == 2
+        assert adapter.closes == 2
+        assert session.stats.reconnects == 1
+        assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+
+        reading = await session.async_read_meter()
+        assert reading.instantaneous_power == fake.EXPECTED_POWER
+        assert adapter.opens == 3
+        assert session.stats.connects == 3
+        assert len(adapter.sent(commands.CommandCode.ACTIVE_SCAN)) == 1
+    finally:
+        await session.async_close()
 
 
 async def test_a_refused_get_is_reported() -> None:

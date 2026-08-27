@@ -369,7 +369,25 @@ class J11Session:
     async def async_read_meter(self) -> MeterReading:
         """Poll the meter, reconnecting first if the link went away."""
         await self.async_ensure_connected()
-        values = await self._async_get_properties(MEASUREMENT_PROPERTIES)
+        try:
+            values = await self._async_get_properties(MEASUREMENT_PROPERTIES)
+        except (SessionTimeoutError, TransmissionError, EchonetFrameError) as err:
+            _LOGGER.warning(
+                "Meter polling exhausted its retries (%s); rebuilding the session",
+                err,
+            )
+            await self._async_teardown()
+            self._stats.reconnects += 1
+            await self.async_ensure_connected()
+            try:
+                values = await self._async_get_properties(MEASUREMENT_PROPERTIES)
+            except (
+                SessionTimeoutError,
+                TransmissionError,
+                EchonetFrameError,
+            ):
+                await self._async_teardown()
+                raise
         return self._decode_reading(values)
 
     async def async_ensure_connected(self) -> MeterLink:
