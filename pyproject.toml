@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Home Assistant custom integration for B-route smart meters behind ROHM BP35C0-J11 Wi-SUN adapters"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.13"
+requires-python = ">=3.13.2"
 dependencies = ["broute-j11==0.1.0"]
 
 [project.optional-dependencies]
