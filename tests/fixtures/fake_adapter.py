@@ -1,10 +1,10 @@
 """An in-memory BP35C0-J11 adapter and smart meter.
 
 The fake speaks the real binary protocol over the same blocking transport
-interface the pyserial implementation exposes, so session tests exercise the
-production framing, routing and lifecycle code instead of mocks. Failure modes
-(no beacon, rejected credentials, a silent adapter, a vanished USB device,
-line noise) are configuration, not patching.
+interface the pyserial implementation exposes, so integration tests exercise
+the library's production framing, routing, and lifecycle code instead of
+mocks. Failure modes (no beacon, rejected credentials, a silent adapter, a
+vanished USB device, line noise) are configuration, not patching.
 """
 
 from __future__ import annotations
@@ -15,18 +15,18 @@ import threading
 import time
 from typing import Final
 
-from custom_components.broute_j11.protocol.codec import (
+from broute_j11.codec import (
     RESPONSE_UNIQUE_CODE,
     Frame,
     FrameReassembler,
     response_code,
 )
-from custom_components.broute_j11.protocol.commands import (
+from broute_j11.commands import (
     ALL_CHANNELS_MASK,
     CommandCode,
     NotificationCode,
 )
-from custom_components.broute_j11.protocol.echonet import (
+from broute_j11.echonet import (
     CONTROLLER_OBJECT,
     LOW_VOLTAGE_METER_OBJECT,
     EchonetLiteFrame,
@@ -34,7 +34,7 @@ from custom_components.broute_j11.protocol.echonet import (
     Esv,
     Property,
 )
-from custom_components.broute_j11.protocol.transport import TransportError
+from broute_j11.transport import TransportError
 
 #: Meter identity used by ROHM's own documentation samples.
 METER_MAC: Final = bytes.fromhex("0050C2FFFEDC2822")

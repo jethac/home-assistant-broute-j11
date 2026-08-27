@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from broute_j11.echonet import Epc
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,
@@ -11,8 +12,6 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-from custom_components.broute_j11.protocol.echonet import Epc
 
 from . import conftest
 from .fixtures import fake_adapter as fake

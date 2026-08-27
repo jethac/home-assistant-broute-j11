@@ -12,20 +12,21 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from broute_j11 import (
+    AuthenticationError,
+    J11Session,
+    MeterReading,
+    ProtocolError,
+    SessionError,
+    TransportError,
+)
+
 from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MANUFACTURER,
 )
-from .protocol.codec import ProtocolError
-from .protocol.session import (
-    AuthenticationError,
-    J11Session,
-    MeterReading,
-    SessionError,
-)
-from .protocol.transport import TransportError
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -11,6 +11,23 @@ from homeassistant.helpers import selector
 from serial.tools import list_ports
 import voluptuous as vol
 
+from broute_j11 import (
+    AuthenticationError,
+    J11Session,
+    MeterNotFoundError,
+    ProtocolError,
+    SerialTransport,
+    SessionConfig,
+    SessionError,
+    SessionTimeoutError,
+    TransportError,
+)
+from broute_j11.commands import (
+    CredentialFormatError,
+    validate_auth_id,
+    validate_password,
+)
+
 from .const import (
     CONF_AUTH_ID,
     CONF_DEVICE,
@@ -22,21 +39,6 @@ from .const import (
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import BrouteConfigEntry, meter_identifier
-from .protocol.codec import ProtocolError
-from .protocol.commands import (
-    CredentialFormatError,
-    validate_auth_id,
-    validate_password,
-)
-from .protocol.session import (
-    AuthenticationError,
-    J11Session,
-    MeterNotFoundError,
-    SessionConfig,
-    SessionError,
-    SessionTimeoutError,
-)
-from .protocol.transport import SerialTransport, TransportError
 
 _LOGGER = logging.getLogger(__name__)
 

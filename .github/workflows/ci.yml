@@ -36,10 +36,6 @@ jobs:
         run: |
           pytest -q --cov --cov-report=term-missing --cov-fail-under=90 \
             -m "not hardware"
-      - name: Protocol branch coverage gate
-        run: |
-          coverage report --include="custom_components/broute_j11/protocol/*" \
-            --fail-under=90 -m
 
   secret-scan:
     runs-on: ubuntu-latest

@@ -17,8 +17,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from broute_j11 import MeterReading
+
 from .coordinator import BrouteConfigEntry, BrouteCoordinator
-from .protocol.session import MeterReading
 
 
 @dataclass(frozen=True, kw_only=True)
