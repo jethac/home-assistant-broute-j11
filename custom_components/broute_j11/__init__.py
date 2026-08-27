@@ -8,6 +8,17 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
+from broute_j11 import (
+    AuthenticationError,
+    CachedNetwork,
+    J11Session,
+    ProtocolError,
+    SerialTransport,
+    SessionConfig,
+    SessionError,
+    TransportError,
+)
+
 from .const import (
     CONF_AUTH_ID,
     CONF_CHANNEL,
@@ -19,15 +30,6 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
 )
 from .coordinator import BrouteConfigEntry, BrouteCoordinator
-from .protocol.codec import ProtocolError
-from .protocol.session import (
-    AuthenticationError,
-    CachedNetwork,
-    J11Session,
-    SessionConfig,
-    SessionError,
-)
-from .protocol.transport import SerialTransport, TransportError
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 

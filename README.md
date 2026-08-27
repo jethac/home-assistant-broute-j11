@@ -142,22 +142,20 @@ custom_components/broute_j11/
   sensor.py
   strings.json
   translations/
-  protocol/
-    codec.py
-    commands.py
-    echonet.py
-    session.py
 tests/
   fixtures/
-  test_codec.py
-  test_commands.py
   test_config_flow.py
-  test_echonet.py
-  test_session.py
+  test_diagnostics.py
+  test_init.py
+  test_package_boundary.py
   test_sensor.py
 ```
 
-The protocol package belongs inside the integration so installation remains a single copy operation, while retaining clear boundaries and unit-testable APIs.
+The binary protocol, serial transport, and reconnecting session live in the
+separately reviewed [`broute-j11`](https://github.com/jethac/broute-j11)
+package. The integration pins the reviewed release exactly in its manifest, so
+Home Assistant installs it automatically while the integration repository
+retains only Home Assistant-specific behavior and tests.
 
 ## Security
 

@@ -21,17 +21,12 @@ import argparse
 import asyncio
 import logging
 import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from custom_components.broute_j11.protocol.codec import ProtocolError
-from custom_components.broute_j11.protocol.session import (
+from broute_j11 import (
     J11Session,
-    SessionConfig,
-)
-from custom_components.broute_j11.protocol.transport import (
+    ProtocolError,
     SerialTransport,
+    SessionConfig,
     TransportError,
 )
 

@@ -4,7 +4,7 @@
 
 ```bash
 python3.13 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e ../broute-j11 -e ".[dev]"
 .venv/bin/pre-commit install
 ```
 
@@ -21,30 +21,27 @@ every commit.
 .venv/bin/python scripts/secret_scan.py
 ```
 
-CI runs the same commands. Protocol code must keep branch coverage at 90% or
-above.
+CI runs the same commands. The Home Assistant integration must keep branch
+coverage at 90% or above.
 
 ## Design boundaries
 
-| Module | Responsibility |
+| Repository/module | Responsibility |
 | --- | --- |
-| `protocol/codec.py` | Frame headers, checksums, incremental reassembly. Pure bytes in, frames out. |
-| `protocol/commands.py` | J11 request builders and response/notification parsers. No I/O. |
-| `protocol/echonet.py` | ECHONET Lite frames, property decoding, unit conversion. No I/O. |
-| `protocol/transport.py` | Blocking pyserial calls, nothing else. |
-| `protocol/session.py` | Asynchronous lifecycle: reset, scan, PANA, polling, reconnect. |
-| Everything else | Home Assistant glue only. |
+| `broute-j11` | Binary framing, commands, ECHONET Lite, serial transport, session lifecycle, and reconnect behavior. |
+| `custom_components/broute_j11/` | Home Assistant config entries, flows, coordinator, entities, and diagnostics. |
+| `tests/fixtures/fake_adapter.py` | Synthetic in-memory adapter used only at the integration boundary. |
 
-The codec, command and ECHONET modules must stay importable without Home
-Assistant and without a serial port, and serial I/O must always run through
-`run_in_executor` so the event loop is never blocked.
+Protocol changes and their tests belong in the `broute-j11` repository. Keep
+the integration pinned to an exact reviewed library release.
 
 ## Testing
 
-Write a focused failing test before fixing a protocol bug or adding a
-behaviour. Protocol and integration tests run against the in-memory adapter in
+Write a focused failing test before fixing an integration bug or adding a
+behavior. Integration tests run against the in-memory adapter in
 `tests/fixtures/fake_adapter.py`, which speaks the real binary protocol; prefer
-extending its `AdapterBehaviour` over patching production code.
+extending its `AdapterBehaviour` over weakening Home Assistant behavior
+assertions. Run the standalone library suite for protocol changes.
 
 Never commit real credentials, meter identifiers, MAC addresses, PAN IDs, USB
 serial numbers or captured frames. Fixtures use synthetic values, and
@@ -53,9 +50,10 @@ appears in the tree.
 
 ## Hardware validation
 
-CI cannot verify radio behaviour. Changes to the session state machine should be
-confirmed with `tools/validate_hardware.py` against a real adapter, as described
-in the README, and the result quoted in the pull request.
+CI cannot verify radio behavior. Changes to the standalone library's session
+state machine should be confirmed with its hardware validator against a real
+adapter. Integration releases should also run `tools/validate_hardware.py` as
+described in the README, and quote the result in the pull request.
 
 ## Upstream license
 

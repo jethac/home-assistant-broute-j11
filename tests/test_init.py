@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from broute_j11.commands import CommandCode
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -12,7 +13,6 @@ from custom_components.broute_j11.const import (
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
-from custom_components.broute_j11.protocol.commands import CommandCode
 
 from .fixtures.fake_adapter import (
     METER_CHANNEL,

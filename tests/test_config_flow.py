@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from types import SimpleNamespace
 
+from broute_j11.commands import NotificationCode
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -21,7 +22,6 @@ from custom_components.broute_j11.const import (
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
-from custom_components.broute_j11.protocol.commands import NotificationCode
 
 from .conftest import AUTH_ID, DEVICE, PASSWORD
 from .fixtures.fake_adapter import AdapterBehaviour, FakeAdapter

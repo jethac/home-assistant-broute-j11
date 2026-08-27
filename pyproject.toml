@@ -5,7 +5,7 @@ description = "Home Assistant custom integration for B-route smart meters behind
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.13"
-dependencies = ["pyserial>=3.5"]
+dependencies = ["broute-j11==0.1.0"]
 
 [project.optional-dependencies]
 dev = [
@@ -68,6 +68,7 @@ combine-as-imports = true
 [tool.mypy]
 python_version = "3.13"
 files = ["custom_components/broute_j11"]
+explicit_package_bases = true
 strict = true
 warn_unreachable = true
 

@@ -1,8 +1,8 @@
 """Shared fixtures for the Home Assistant tests.
 
-The integration is exercised against the in-memory adapter used by the
-protocol tests, so setup, entities and diagnostics run the production
-serial-free code path end to end.
+The integration is exercised against an in-memory adapter implementing the
+installed library's transport contract, so setup, entities, and diagnostics
+run the production serial-free code path end to end.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from unittest.mock import patch
 
+from broute_j11 import SessionConfig
 from homeassistant.core import HomeAssistant
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -21,7 +22,6 @@ from custom_components.broute_j11.const import (
     DOMAIN,
 )
 from custom_components.broute_j11.coordinator import meter_identifier
-from custom_components.broute_j11.protocol.session import SessionConfig
 
 from .fixtures.fake_adapter import METER_MAC, AdapterBehaviour, FakeAdapter
 
